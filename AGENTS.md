@@ -39,7 +39,7 @@ npm run lint:fix       # eslint --fix
 npm run test -w packages/amqp
 ```
 
-- **Node.js**: `>=22.0.0` (CI runs on 24)
+- **Development Node.js**: 24.11+ on the 24.x line, or 26+ (CI runs on 24). Published packages require Node.js `>=22.0.0` at runtime.
 - **Package manager**: npm workspaces (`package-lock.json` is committed; use `npm ci` in CI;
   regenerate with a plain `npm install`, never `--package-lock-only` or `--force`)
 - **Build**: [tsdown](https://tsdown.dev) per package, orchestrated by [nx](https://nx.dev)
