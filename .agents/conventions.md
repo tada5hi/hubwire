@@ -95,10 +95,10 @@ Config lives in `release-please-config.json` (`release-type: node`, `bump-minor-
 
 ## CI/CD
 
-- `.github/workflows/main.yml` — CI on push/PR to `develop`, `master`, `next`, `beta`, `alpha`: install → build → lint + typecheck + test in parallel. Node 24, concurrency group cancels superseded runs.
+- `.github/workflows/main.yml` — CI on push/PR to `develop`, `master`, `next`, `beta`, `alpha`: install → build → lint + typecheck + test in parallel. the contributor runtime in AGENTS.md, concurrency group cancels superseded runs.
 - `.github/workflows/release.yml` — release-please + npm publish on `master`.
 - Both reuse the composite actions in `.github/actions/` (`install`, `build`) — change caching or the Node setup there, once, rather than per workflow.
-- `PRIMARY_NODE_VERSION` is pinned to `24` in each workflow's `env` block; the packages only require `>=22`.
+- `PRIMARY_NODE_VERSION` in the workflow selects the contributor runtime from AGENTS.md, independently of published package runtime support.
 
 ## Best Practices
 
