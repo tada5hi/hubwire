@@ -665,7 +665,7 @@ describe('src/component/scheduled', () => {
                 expect(seen).toEqual(['2026-01-14T17:00:00.000Z']);
             });
 
-            it('should run a local time the spring-forward change skips one hour later', async () => {
+            it('should run a local time the spring-forward change skips at the end of the gap', async () => {
                 vi.useFakeTimers({ now: new Date('2026-03-29T00:00:00.500Z') });
 
                 const seen: string[] = [];
@@ -680,12 +680,12 @@ describe('src/component/scheduled', () => {
                 await vi.advanceTimersByTimeAsync(48 * 60 * 60 * 1000);
                 await c.stop();
                 expect(seen).toEqual([
-                    '2026-03-29T01:30:00.000Z', // 03:30 CEST
+                    '2026-03-29T01:00:00.000Z', // 03:00 CEST
                     '2026-03-30T00:30:00.000Z', // 02:30 CEST
                 ]);
             });
 
-            it('should run the repeated hour of a fall-back change once', async () => {
+            it('should run interval jobs in both occurrences of a fall-back hour', async () => {
                 vi.useFakeTimers({ now: new Date('2026-10-25T00:40:00.500Z') });
 
                 const seen: string[] = [];
@@ -701,13 +701,17 @@ describe('src/component/scheduled', () => {
                 await c.stop();
                 expect(seen).toEqual([
                     '2026-10-25T00:45:00.000Z', // 02:45 CEST
-                    '2026-10-25T02:00:00.000Z', // 03:00 CET: the second 02:xx hour is skipped
+                    '2026-10-25T01:00:00.000Z',
+                    '2026-10-25T01:15:00.000Z',
+                    '2026-10-25T01:30:00.000Z',
+                    '2026-10-25T01:45:00.000Z',
+                    '2026-10-25T02:00:00.000Z', // 03:00 CET
                     '2026-10-25T02:15:00.000Z',
                 ]);
             });
 
-            it('should wait out a repeated hour it was started in, without spinning', async () => {
-                // 01:10 EST, the second occurrence of 01:xx: croner answers nextRun() with a past instant here
+            it('should schedule interval jobs in a repeated hour without spinning', async () => {
+                // 01:10 EST, the second occurrence of 01:xx.
                 vi.useFakeTimers({ now: new Date('2026-11-01T06:10:00.500Z') });
 
                 const seen: string[] = [];
@@ -724,7 +728,12 @@ describe('src/component/scheduled', () => {
                 expect(vi.getTimerCount()).toBeLessThanOrEqual(1);
                 await vi.advanceTimersByTimeAsync(55 * 60 * 1000);
                 await c.stop();
-                expect(seen).toEqual(['2026-11-01T07:00:00.000Z']); // 02:00 EST
+                expect(seen).toEqual([
+                    '2026-11-01T06:15:00.000Z',
+                    '2026-11-01T06:30:00.000Z',
+                    '2026-11-01T06:45:00.000Z',
+                    '2026-11-01T07:00:00.000Z', // 02:00 EST
+                ]);
             });
         });
     });
