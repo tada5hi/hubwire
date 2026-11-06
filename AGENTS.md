@@ -50,6 +50,8 @@ npm run test -w packages/amqp
 
 ## Detailed Guides
 
+
+AGENTS.md is the loaded entry point and the guide index. Read the linked guides when working on their topics.
 - **[Project Structure](.agents/structure.md)** — Directory layout, module responsibilities, and the package export surface
 - **[Testing](.agents/testing.md)** — Vitest setup, coverage thresholds, and where new specs go
 - **[Conventions](.agents/conventions.md)** — Code style, shared `@tada5hi/*` configs, commit format, CI, and the release-please flow
