@@ -46,6 +46,7 @@ export class AmqpMessageBusDriver implements IMessageBusDriver {
     constructor(options: AmqpMessageBusDriverOptions) {
         this.options = options;
         this.hooks = options.hooks;
+
         if ('client' in options) {
             this.clientInstance = options.client;
         } else {
@@ -93,16 +94,21 @@ export class AmqpMessageBusDriver implements IMessageBusDriver {
             // only the consumer declares it: a topic publish declares no queue, so no 406
             ...(routing.queue ? { queue: routing.queue } : {}),
         };
+
         if (isRetried) {
             options.retry = { maxAttempts, delay: this.options.retryDelay ?? 1000 };
             // The handler's own error reaches MessageBus' onError hook first.
             // ponytail: a crashed redelivery's retries are not reported by amqp-extension, only its drop.
             options.onError = (error, input) => {
                 const attempt = resolveAttempt(input.properties);
+
                 if (isClientError(error) && error.code === ErrorCode.ATTEMPTS_EXHAUSTED) {
-                    if (!this.hooks?.onDrop) return;
+                    if (!this.hooks?.onDrop) {
+                        return;
+                    }
 
                     const message = this.decode(routing, input.content);
+
                     if (message) {
                         invokeHook(this.hooks, 'onDrop', {
                             message,
@@ -115,9 +121,12 @@ export class AmqpMessageBusDriver implements IMessageBusDriver {
                     return;
                 }
 
-                if (!this.hooks?.onRetry) return;
+                if (!this.hooks?.onRetry) {
+                    return;
+                }
 
                 const message = this.decode(routing, input.content);
+
                 if (message) {
                     invokeHook(this.hooks, 'onRetry', {
                         message,
@@ -132,6 +141,7 @@ export class AmqpMessageBusDriver implements IMessageBusDriver {
         return this.resolveExchange(routing).consume(this.resolveKey(routing), options, {
             $any: async (input) => {
                 const message = this.decode(routing, input.content);
+
                 if (!message) {
                     return;
                 }
@@ -149,6 +159,7 @@ export class AmqpMessageBusDriver implements IMessageBusDriver {
 
     async close(): Promise<void> {
         const client = this.clientInstance;
+
         this.clientInstance = undefined;
         this.connectionString = undefined;
         await client?.close();
@@ -159,19 +170,22 @@ export class AmqpMessageBusDriver implements IMessageBusDriver {
      */
     protected decode(routing: MessageRouting, content: Uint8Array): Message | undefined {
         let value: unknown;
+
         try {
             value = JSON.parse(new TextDecoder().decode(content));
         } catch (error) {
             invokeHook(this.hooks, 'onMalformed', {
-                routing, 
-                content, 
-                error, 
+                routing,
+                content,
+                error,
             });
+
             return undefined;
         }
 
         if (!isMessage(value)) {
             invokeHook(this.hooks, 'onMalformed', { routing, content });
+
             return undefined;
         }
 
@@ -193,6 +207,7 @@ export class AmqpMessageBusDriver implements IMessageBusDriver {
      */
     protected resolveKey(routing: MessageRouting): string {
         assertMessageRouting(routing);
+
         return routing.type === MessageRoutingType.WORK && routing.namespace ?
             `${routing.namespace}/${routing.key}` :
             routing.key;

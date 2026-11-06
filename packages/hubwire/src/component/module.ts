@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/prefer-promise-try -- Keep compatibility with the published Node.js runtime requirement. */
 import type { ObjectLiteral } from '../types';
 import type {
     ComponentEventMap,
@@ -82,8 +83,10 @@ export class Component<
             }
 
             let promise = this.initialized.get(handler);
+
             if (!promise) {
                 const run = Promise.resolve().then(() => handler.initialize?.());
+
                 run.catch(() => {
                     if (this.initialized.get(handler) === run) {
                         this.initialized.delete(handler);
@@ -124,6 +127,7 @@ export class Component<
             this.lastSuccessAt = Date.now();
         } finally {
             this.running--;
+
             if (this.running === 0) {
                 this.runningSince = undefined;
             }
@@ -150,12 +154,14 @@ export class Component<
         };
 
         const handler = this.handlers.get(key) ?? this.handlers.get('*') ?? options.handle;
+
         if (!handler) {
             return;
         }
 
         if (typeof handler === 'function') {
             await handler(data, context);
+
             return;
         }
 

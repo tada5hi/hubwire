@@ -96,7 +96,7 @@ install ──► build ──┬──► lint      (npm run lint)
                     └──► tests     (npm run test)
 ```
 
-Node 24, `npm ci`, with `node_modules` cached by `package-lock.json` hash and every `dist/` cached by commit SHA. Note CI runs `npm run test`, **not** `test:coverage` — coverage thresholds are not gating merges today.
+the contributor runtime in AGENTS.md, `npm ci`, with `node_modules` cached by `package-lock.json` hash and every `dist/` cached by commit SHA. Note CI runs `npm run test`, **not** `test:coverage` — coverage thresholds are not gating merges today.
 
 ## Writing New Tests
 

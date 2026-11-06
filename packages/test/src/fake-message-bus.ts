@@ -32,13 +32,17 @@ export class FakeMessageBus implements IMessageBus {
         if (this.publishError) {
             throw this.publishError;
         }
+
         this.published.push(message);
     }
 
-    close(): Promise<void> { return Promise.resolve(); }
+    close(): Promise<void> {
+        return Promise.resolve();
+    }
 
     async consume(routing: MessageRouting, handlers: MessageHandlers): Promise<IMessageBusConsumer> {
         await this.consumeGate;
+
         if (this.consumeError) {
             throw this.consumeError;
         }
@@ -51,6 +55,7 @@ export class FakeMessageBus implements IMessageBus {
                 if (this.cancelError) {
                     throw this.cancelError;
                 }
+
                 this.active--;
             },
         };

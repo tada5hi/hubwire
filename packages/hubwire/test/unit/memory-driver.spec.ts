@@ -14,7 +14,9 @@ describe('src/message-bus/memory', () => {
         const published = message(work);
 
         await driver.publish(work, published);
-        await driver.consume(work, (received) => { seen.push(received); });
+        await driver.consume(work, (received) => {
+            seen.push(received);
+        });
         await drain();
 
         expect(seen.map((received) => received.id)).toEqual([published.id]);
@@ -26,11 +28,15 @@ describe('src/message-bus/memory', () => {
         const subscription: MessageRouting = { ...pubSub, queue: 'hub' };
         const seen: Message[] = [];
         const consumer = await driver.consume(subscription, () => {});
+
         await consumer.cancel();
 
         const published = message(pubSub);
+
         await driver.publish(pubSub, published);
-        await driver.consume(subscription, (received) => { seen.push(received); });
+        await driver.consume(subscription, (received) => {
+            seen.push(received);
+        });
         await drain();
 
         expect(seen.map((received) => received.id)).toEqual([published.id]);
@@ -42,7 +48,9 @@ describe('src/message-bus/memory', () => {
         const pubSub: MessageRouting = { type: 'pubSub', key: 'events' };
 
         await driver.publish(pubSub, message(pubSub));
-        await driver.consume(pubSub, () => { seen.push('pubSub'); });
+        await driver.consume(pubSub, () => {
+            seen.push('pubSub');
+        });
         await drain();
 
         expect(seen).toEqual([]);
@@ -52,11 +60,18 @@ describe('src/message-bus/memory', () => {
         const driver = new MemoryMessageBusDriver();
         const seen: string[] = [];
         const namespaced: MessageRouting = { ...work, namespace: 'tasks' };
-        await driver.consume(work, () => { seen.push('plain'); });
+
+        await driver.consume(work, () => {
+            seen.push('plain');
+        });
 
         await driver.publish(namespaced, message(namespaced));
-        await driver.consume(namespaced, () => { seen.push('a'); });
-        await driver.consume(namespaced, () => { seen.push('b'); });
+        await driver.consume(namespaced, () => {
+            seen.push('a');
+        });
+        await driver.consume(namespaced, () => {
+            seen.push('b');
+        });
         await driver.publish(namespaced, message(namespaced));
         await drain();
 
@@ -66,19 +81,29 @@ describe('src/message-bus/memory', () => {
     it('should round-robin WORK messages, and keep an ordered routing on one consumer', async () => {
         const driver = new MemoryMessageBusDriver();
         const ordered: MessageRouting = {
-            ...work, 
-            key: 'replies', 
-            ordered: true, 
+            ...work,
+            key: 'replies',
+            ordered: true,
         };
         const seen: string[] = [];
-        await driver.consume(work, () => { seen.push('a'); });
-        await driver.consume(work, () => { seen.push('b'); });
-        await driver.consume(ordered, () => { seen.push('first'); });
-        await driver.consume(ordered, () => { seen.push('second'); });
+
+        await driver.consume(work, () => {
+            seen.push('a');
+        });
+        await driver.consume(work, () => {
+            seen.push('b');
+        });
+        await driver.consume(ordered, () => {
+            seen.push('first');
+        });
+        await driver.consume(ordered, () => {
+            seen.push('second');
+        });
 
         for (let i = 0; i < 4; i++) {
             await driver.publish(work, message(work));
         }
+
         await driver.publish(ordered, message(ordered));
         await driver.publish(ordered, message(ordered));
         await drain();
@@ -90,9 +115,16 @@ describe('src/message-bus/memory', () => {
         const driver = new MemoryMessageBusDriver();
         const pubSub: MessageRouting = { type: 'pubSub', key: 'events' };
         const seen: string[] = [];
-        await driver.consume(pubSub, () => { seen.push('plain'); });
-        await driver.consume({ ...pubSub, queue: 'hub' }, () => { seen.push('hub'); });
-        await driver.consume({ ...pubSub, queue: 'other' }, () => { seen.push('other'); });
+
+        await driver.consume(pubSub, () => {
+            seen.push('plain');
+        });
+        await driver.consume({ ...pubSub, queue: 'hub' }, () => {
+            seen.push('hub');
+        });
+        await driver.consume({ ...pubSub, queue: 'other' }, () => {
+            seen.push('other');
+        });
 
         await driver.publish({ ...pubSub, queue: 'hub' }, message(pubSub));
         await driver.publish({ ...pubSub, queue: 'ghost' }, message(pubSub));
@@ -104,20 +136,25 @@ describe('src/message-bus/memory', () => {
     it('should run the handlers of an ordered routing one at a time, also across a failover', async () => {
         const driver = new MemoryMessageBusDriver();
         const ordered: MessageRouting = {
-            ...work, 
-            key: 'replies', 
-            ordered: true, 
+            ...work,
+            key: 'replies',
+            ordered: true,
         };
         const log: string[] = [];
         const release = Promise.withResolvers<void>();
         const first = await driver.consume(ordered, async (received) => {
             log.push(`start ${received.type}`);
+
             if (received.type === 'a') {
                 await release.promise;
             }
+
             log.push(`end ${received.type}`);
         });
-        await driver.consume(ordered, (received) => { log.push(`second ${received.type}`); });
+
+        await driver.consume(ordered, (received) => {
+            log.push(`second ${received.type}`);
+        });
 
         await driver.publish(ordered, buildMessage({ type: 'a', metadata: { routing: ordered } }));
         await driver.publish(ordered, buildMessage({ type: 'b', metadata: { routing: ordered } }));
@@ -125,6 +162,7 @@ describe('src/message-bus/memory', () => {
         expect(log).toEqual(['start a']);
 
         const cancelled = first.cancel();
+
         await driver.publish(ordered, buildMessage({ type: 'c', metadata: { routing: ordered } }));
         await drain();
         expect(log).toEqual(['start a']);
@@ -142,8 +180,12 @@ describe('src/message-bus/memory', () => {
         const seen: string[] = [];
 
         await driver.publish(plain, message(plain));
-        await driver.consume(ordered, () => { seen.push('first'); });
-        await driver.consume(ordered, () => { seen.push('second'); });
+        await driver.consume(ordered, () => {
+            seen.push('first');
+        });
+        await driver.consume(ordered, () => {
+            seen.push('second');
+        });
         await driver.publish(plain, message(plain));
         await driver.publish(plain, message(plain));
         await drain();
@@ -154,8 +196,13 @@ describe('src/message-bus/memory', () => {
     it('should stop delivering to a cancelled consumer', async () => {
         const driver = new MemoryMessageBusDriver();
         const seen: string[] = [];
-        const a = await driver.consume(work, () => { seen.push('a'); });
-        await driver.consume(work, () => { seen.push('b'); });
+        const a = await driver.consume(work, () => {
+            seen.push('a');
+        });
+
+        await driver.consume(work, () => {
+            seen.push('b');
+        });
 
         await a.cancel();
         await driver.publish(work, message(work));
@@ -168,7 +215,11 @@ describe('src/message-bus/memory', () => {
     it('should hand the handler a copy with delivery info, leaving the published metadata as is', async () => {
         const driver = new MemoryMessageBusDriver();
         const seen: Message[] = [];
-        await driver.consume(work, (received) => { seen.push(received); });
+
+        await driver.consume(work, (received) => {
+            seen.push(received);
+        });
+
         const published = message(work);
 
         await driver.publish(work, published);

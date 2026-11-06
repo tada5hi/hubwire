@@ -19,7 +19,9 @@ describe('src/dispatcher/remote', () => {
             .dispatch('execute', { id: 'a' });
 
         expect(messageBus.published).toHaveLength(1);
+
         const [message] = messageBus.published;
+
         expect(message?.type).toBe('execute');
         expect(message?.data).toEqual({ id: 'a' });
         expect(message?.metadata.routing).toEqual(routing);
@@ -29,6 +31,7 @@ describe('src/dispatcher/remote', () => {
 
     it('should keep a given correlationId, persistent and expiresAt', async () => {
         const messageBus = new FakeMessageBus();
+
         await new RemoteDispatcher<TestEventMap>({ messageBus, routing })
             .dispatch('execute', { id: 'a' }, {
                 correlationId: 'c',
@@ -64,10 +67,12 @@ describe('src/dispatcher/remote', () => {
             correlationId: 'c',
         };
         const before = Date.now();
+
         await new RemoteDispatcher<TestEventMap>({ messageBus, routing })
             .dispatch('execute', { id: 'a' }, inbound);
 
         const metadata = messageBus.published[0]?.metadata;
+
         expect(metadata).not.toHaveProperty('delivery');
         expect(metadata).not.toHaveProperty('attempt');
         expect(metadata?.timestamp).toBeGreaterThanOrEqual(before);

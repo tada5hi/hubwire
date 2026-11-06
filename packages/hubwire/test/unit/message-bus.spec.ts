@@ -31,6 +31,7 @@ class CaptureDriver implements IMessageBusDriver {
 
     async consume(_routing: MessageRouting, handler: MessageHandler): Promise<IMessageBusConsumer> {
         this.handler = handler;
+
         return { cancel: async () => {} };
     }
 
@@ -75,26 +76,27 @@ describe('src/message-bus', () => {
             type: 'run',
             metadata: { timestamp: undefined, routing: { type: 'work', key: 'q' } },
         });
+
         expect(message.metadata.timestamp).toBeTypeOf('number');
     });
 
     it('should reject malformed messages', () => {
         expect(isMessage(null)).toBe(false);
         expect(isMessage({
-            id: 'a', 
-            type: 'run', 
-            data: {}, 
+            id: 'a',
+            type: 'run',
+            data: {},
         })).toBe(false);
         expect(isMessage({
-            id: 1, 
-            type: 'run', 
-            data: {}, 
+            id: 1,
+            type: 'run',
+            data: {},
             metadata: {},
         })).toBe(false);
         expect(isMessage({
-            id: 'a', 
-            type: 'run', 
-            data: 'x', 
+            id: 'a',
+            type: 'run',
+            data: 'x',
             metadata: {},
         })).toBe(false);
     });
@@ -110,9 +112,9 @@ describe('src/message-bus', () => {
 
         expect(JSON.parse(serializeMessage(message)).data).toEqual({
             error: {
-                name: 'Error', 
-                message: 'boom', 
-                code: 'E_X', 
+                name: 'Error',
+                message: 'boom',
+                code: 'E_X',
             },
             plain: { name: 'TypeError', message: 't' },
         });
@@ -122,9 +124,14 @@ describe('src/message-bus', () => {
         const driver = new CaptureDriver();
         const bus = new MessageBus({ driver });
         const seen: string[] = [];
+
         await bus.consume(routing, {
-            run: (message: Message) => { seen.push(`run:${message.type}`); },
-            '*': (message) => { seen.push(`any:${message.type}`); },
+            run: (message: Message) => {
+                seen.push(`run:${message.type}`);
+            },
+            '*': (message) => {
+                seen.push(`any:${message.type}`);
+            },
         });
 
         await driver.deliver(buildMessage({ type: 'run', metadata: { routing } }));
@@ -152,9 +159,17 @@ describe('src/message-bus', () => {
         const driver = new CaptureDriver();
         const bus = new MessageBus({
             driver,
-            hooks: { onError: (...args) => { errors.push(args); } },
+            hooks: {
+                onError: (...args) => {
+                    errors.push(args);
+                },
+            },
         });
-        await bus.consumeAny(routing, () => { throw failure; });
+
+        await bus.consumeAny(routing, () => {
+            throw failure;
+        });
+
         const message = buildMessage({ type: 'run', metadata: { routing } });
 
         await expect(driver.deliver(message)).rejects.toThrow('x');
@@ -167,15 +182,23 @@ describe('src/message-bus', () => {
         const bus = new MessageBus({
             driver,
             hooks: {
-                onPublish: (message) => { calls.push(['publish', message]); },
-                onConsume: (message, from) => { calls.push(['consume', message, from]); },
-                onUnhandled: (message, from) => { calls.push(['unhandled', message, from]); },
+                onPublish: (message) => {
+                    calls.push(['publish', message]);
+                },
+                onConsume: (message, from) => {
+                    calls.push(['consume', message, from]);
+                },
+                onUnhandled: (message, from) => {
+                    calls.push(['unhandled', message, from]);
+                },
             },
         });
+
         await bus.consume(routing, { run: () => {} });
 
         const run = buildMessage({ type: 'run', metadata: { routing } });
         const other = buildMessage({ type: 'other', metadata: { routing } });
+
         await bus.publish(run);
         await driver.deliver(run);
         await expect(driver.deliver(other)).resolves.toBeUndefined();
@@ -194,16 +217,26 @@ describe('src/message-bus', () => {
         const bus = new MessageBus({
             driver,
             hooks: {
-                onExpired: (message, from) => { calls.push(['expired', message, from]); },
-                onError: (_error, message, from) => { calls.push(['error', message, from]); },
-                onUnhandled: (message, from) => { calls.push(['unhandled', message, from]); },
+                onExpired: (message, from) => {
+                    calls.push(['expired', message, from]);
+                },
+                onError: (_error, message, from) => {
+                    calls.push(['error', message, from]);
+                },
+                onUnhandled: (message, from) => {
+                    calls.push(['unhandled', message, from]);
+                },
             },
         });
         const handled: string[] = [];
-        await bus.consumeAny(routing, (message) => { handled.push(message.id); });
+
+        await bus.consumeAny(routing, (message) => {
+            handled.push(message.id);
+        });
 
         const expired = buildMessage({ type: 'run', metadata: { routing, expiresAt: Date.now() - 1 } });
         const fresh = buildMessage({ type: 'run', metadata: { routing, expiresAt: Date.now() + 60_000 } });
+
         await expect(driver.deliver(expired)).resolves.toBeUndefined();
         await driver.deliver(fresh);
 
@@ -212,7 +245,9 @@ describe('src/message-bus', () => {
     });
 
     it('should keep every outcome when a hook throws or rejects', async () => {
-        const fail = () => { throw new Error('hook'); };
+        const fail = () => {
+            throw new Error('hook');
+        };
         const driver = new CaptureDriver();
         const bus = new MessageBus({
             driver,
@@ -225,9 +260,14 @@ describe('src/message-bus', () => {
             },
         });
         const handled: string[] = [];
+
         await bus.consume(routing, {
-            run: (message) => { handled.push(message.type); },
-            boom: () => { throw new Error('handler'); },
+            run: (message) => {
+                handled.push(message.type);
+            },
+            boom: () => {
+                throw new Error('handler');
+            },
         });
 
         // published despite onPublish

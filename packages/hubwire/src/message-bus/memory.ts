@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/prefer-promise-try -- Keep compatibility with the published Node.js runtime requirement. */
 import { MessageRoutingType } from './constants';
 import { assertMessageRouting } from './helpers';
 import type {
@@ -43,13 +44,16 @@ export class MemoryMessageBusDriver implements IMessageBusDriver {
         if (this.closed) {
             throw new Error('The memory message bus driver was closed.');
         }
+
         assertMessageRouting(routing);
 
         // amqp: a publish declares no queue, so `queue` is a consumer's option only
         const queue = this.resolveQueue({ ...routing, queue: undefined });
+
         if (queue) {
             queue.pending.push(message);
             this.flush(queue);
+
             return;
         }
 
@@ -71,6 +75,7 @@ export class MemoryMessageBusDriver implements IMessageBusDriver {
         if (this.closed) {
             throw new Error('The memory message bus driver was closed.');
         }
+
         assertMessageRouting(routing);
 
         const consumer: MemoryConsumer = {
@@ -78,9 +83,11 @@ export class MemoryMessageBusDriver implements IMessageBusDriver {
             handler,
             inFlight: new Set(),
         };
+
         this.consumers.push(consumer);
 
         const queue = this.resolveQueue(routing);
+
         if (queue) {
             // the consumer declares the queue (ordered or not), not a publish that came first
             queue.routing = routing;
@@ -108,12 +115,14 @@ export class MemoryMessageBusDriver implements IMessageBusDriver {
      */
     protected resolveQueue(routing: MessageRouting): MemoryQueue | undefined {
         const isWork = routing.type === MessageRoutingType.WORK;
+
         if (!isWork && !routing.queue) {
             return undefined;
         }
 
         const name = JSON.stringify([routing.type, routing.namespace || '', routing.key, isWork ? '' : routing.queue]);
         let queue = this.queues.get(name);
+
         if (!queue) {
             queue = {
                 routing,
@@ -129,19 +138,23 @@ export class MemoryMessageBusDriver implements IMessageBusDriver {
     protected flush(queue: MemoryQueue): void {
         const { routing } = queue;
         const matching = this.match(routing).filter((consumer) => consumer.routing.queue === routing.queue);
+
         while (matching.length > 0 && queue.pending.length > 0) {
             if (routing.ordered) {
                 // amqp: single active consumer, prefetch 1
                 if (queue.busy) {
                     return;
                 }
+
                 queue.busy = true;
                 this.deliver(matching[0]!, queue.pending.shift()!).then(() => {
                     queue.busy = false;
                     this.flush(queue);
                 });
+
                 return;
             }
+
             this.deliver(matching[queue.index++ % matching.length]!, queue.pending.shift()!);
         }
     }
@@ -159,8 +172,10 @@ export class MemoryMessageBusDriver implements IMessageBusDriver {
         const promise = Promise.resolve()
             .then(() => consumer.handler(copy))
             .catch(() => {});
+
         consumer.inFlight.add(promise);
         promise.then(() => consumer.inFlight.delete(promise));
+
         return promise;
     }
 }

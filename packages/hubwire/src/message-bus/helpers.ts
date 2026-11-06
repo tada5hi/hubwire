@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/prefer-error-is-error -- Keep compatibility with the published Node.js runtime requirement. */
 import type { ObjectLiteral } from '../types';
 import { MessageRoutingType } from './constants';
 import type { Message, MessageInput, MessageRouting } from './types';
@@ -46,7 +47,7 @@ export function isMessage(input: unknown): input is Message {
  */
 export function serializeMessage(message: Message): string {
     return JSON.stringify(message, (_key, value: unknown) => {
-        if (value instanceof Error) {
+        if ((value instanceof Error)) {
             return {
                 name: value.name,
                 message: value.message,

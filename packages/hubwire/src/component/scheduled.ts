@@ -28,6 +28,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
     // croner only evaluates the expression: it is never given a callback, so it arms no timer.
     // The loop below waits for each slot itself, so a pass knows the slot it runs for.
     let evaluator: Cron;
+
     try {
         evaluator = new Cron(options.schedule, {
             mode: '5-or-6-parts',
@@ -77,22 +78,26 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
     const run = async (scheduledAt: Date, locked: boolean) => {
         if (locked && lock) {
             let acquired: boolean;
+
             try {
                 acquired = await lock.instance.acquire(`${lock.name}:${scheduledAt.toISOString()}`, lock.ttlMs);
             } catch (e) {
                 // fail closed: the next tick tries again
                 invokeHook(options.hooks, 'onError', e);
+
                 return;
             }
 
             if (!acquired) {
                 invokeHook(options.hooks, 'onSkip', scheduledAt);
+
                 return;
             }
             // never released: the key is unique per tick, its TTL ends it
         }
 
         runningSince = Date.now();
+
         try {
             await options.run({ scheduledAt });
             lastSuccessAt = Date.now();
@@ -106,22 +111,28 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
     // the start pass is not locked: its scheduledAt differs per replica, a lock could not dedupe it
     const execute = (scheduledAt: Date, locked: boolean) => {
         // cleared asynchronously: a run() that throws synchronously must not leave a settled pass behind
-        pass ??= run(scheduledAt, locked).finally(() => { pass = undefined; });
+        pass ??= run(scheduledAt, locked).finally(() => {
+            pass = undefined;
+        });
+
         return pass;
     };
 
     function arm() {
         const from = Math.max(Date.now(), last);
         const next = evaluator.nextRun(new Date(from));
+
         if (!next) {
             // the expression ran out of future runs (checked at definition, so only defensive)
             timer = undefined;
+
             return;
         }
 
         if (next.getTime() <= from) {
             // inside a repeated DST hour croner can answer with a past instant: look again later
             timer = setTimeout(arm, RECHECK_MS);
+
             return;
         }
 
@@ -133,6 +144,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             if (Date.now() < slot) {
                 // a capped wait woke before the slot
                 wait(slot);
+
                 return;
             }
 
@@ -144,6 +156,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
                 // fired so late (a stall, a sleep) that the tick's key may have expired after
                 // another replica ran it: running it now could run it twice
                 invokeHook(options.hooks, 'onSkip', new Date(slot));
+
                 return;
             }
 
@@ -158,6 +171,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             }
 
             const current = ++generation;
+
             if (options.runOnStart ?? !lock) {
                 await execute(new Date(), false);
             }

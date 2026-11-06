@@ -6,10 +6,10 @@ import type {
 import type { AmqpDeliveryHandler, IAmqpClient } from '../../../src';
 
 export type FakeAmqpPublish = {
-    exchange: Exchange, 
-    key: string, 
-    body: string, 
-    options: PublishOptions 
+    exchange: Exchange,
+    key: string,
+    body: string,
+    options: PublishOptions
 };
 export type FakeAmqpConsume = {
     exchange: Exchange,
@@ -43,8 +43,8 @@ export class FakeAmqpClient implements IAmqpClient {
     constructor(exchange: Exchange = { type: 'direct' }, log?: FakeAmqpLog) {
         this.exchange = exchange;
         this.log = log ?? {
-            publishes: [], 
-            consumes: [], 
+            publishes: [],
+            consumes: [],
         };
     }
 
@@ -56,11 +56,17 @@ export class FakeAmqpClient implements IAmqpClient {
         });
     }
 
-    get publishes() { return this.log.publishes; }
+    get publishes() {
+        return this.log.publishes;
+    }
 
-    get consumes() { return this.log.consumes; }
+    get consumes() {
+        return this.log.consumes;
+    }
 
-    get closed() { return this.log.closed ?? 0; }
+    get closed() {
+        return this.log.closed ?? 0;
+    }
 
     of(exchange: Exchange): FakeAmqpClient {
         return new FakeAmqpClient(exchange, this.log);
@@ -68,13 +74,14 @@ export class FakeAmqpClient implements IAmqpClient {
 
     async publish(key: string, body: string, options: PublishOptions): Promise<boolean> {
         this.log.publishes.push({
-            exchange: this.exchange, 
-            key, 
-            body, 
-            options, 
+            exchange: this.exchange,
+            key,
+            body,
+            options,
         });
 
         const { loopback } = this.log;
+
         if (loopback) {
             const matching = this.log.consumes.filter((entry) => !entry.cancelled &&
                 entry.key === key &&
@@ -84,13 +91,16 @@ export class FakeAmqpClient implements IAmqpClient {
             const queues = Map.groupBy(matching, (entry) => (this.exchange.name ? entry.options.queue ?? entry : ''));
             const single = !!options.singleActiveConsumer;
             const targets = queues.values().toArray().map((group) => group[single ? 0 : loopback.index++ % group.length]!);
+
             for (const entry of targets) {
                 const handled = (single ? loopback.active.get(key) ?? Promise.resolve() : Promise.resolve())
                     .then(() => entry.handler({ content: Buffer.from(body), properties: {} }))
                     .catch(() => {});
+
                 if (single) {
                     loopback.active.set(key, handled);
                 }
+
                 entry.inFlight.add(handled);
                 handled.then(() => entry.inFlight.delete(handled));
             }
@@ -101,13 +111,14 @@ export class FakeAmqpClient implements IAmqpClient {
 
     async consume(key: string, options: ConsumeOptions, handlers: { $any: AmqpDeliveryHandler }) {
         const entry: FakeAmqpConsume = {
-            exchange: this.exchange, 
-            key, 
-            options, 
-            handler: handlers.$any, 
-            cancelled: false, 
+            exchange: this.exchange,
+            key,
+            options,
+            handler: handlers.$any,
+            cancelled: false,
             inFlight: new Set(),
         };
+
         this.log.consumes.push(entry);
 
         return {
@@ -120,6 +131,7 @@ export class FakeAmqpClient implements IAmqpClient {
 
     close() {
         this.log.closed = this.closed + 1;
+
         return Promise.resolve();
     }
 }

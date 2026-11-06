@@ -3,5 +3,7 @@
  * driver delivers on microtasks, so every hop of a publish -> handler -> publish chain is done.
  */
 export function drain(): Promise<void> {
-    return new Promise((resolve) => { setImmediate(resolve); });
+    return new Promise((resolve) => {
+        setImmediate(resolve);
+    });
 }

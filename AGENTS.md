@@ -1,5 +1,3 @@
-<!-- NOTE: Keep this file and all corresponding files in the .agents directory updated as the project evolves. When making architectural changes, adding new patterns, or discovering important conventions, update the relevant sections. -->
-
 # hubwire — Agent Guide
 
 An npm workspaces monorepo with three packages:
@@ -39,7 +37,7 @@ npm run lint:fix       # eslint --fix
 npm run test -w packages/amqp
 ```
 
-- **Node.js**: `>=22.0.0` (CI runs on 24)
+- **Development Node.js**: 24.11+ on the 24.x line, or 26+ (CI runs on 24). Published packages require Node.js `>=22.0.0` at runtime.
 - **Package manager**: npm workspaces (`package-lock.json` is committed; use `npm ci` in CI;
   regenerate with a plain `npm install`, never `--package-lock-only` or `--force`)
 - **Build**: [tsdown](https://tsdown.dev) per package, orchestrated by [nx](https://nx.dev)
@@ -52,9 +50,19 @@ npm run test -w packages/amqp
 
 ## Detailed Guides
 
+
 - **[Project Structure](.agents/structure.md)** — Directory layout, module responsibilities, and the package export surface
 - **[Testing](.agents/testing.md)** — Vitest setup, coverage thresholds, and where new specs go
 - **[Conventions](.agents/conventions.md)** — Code style, shared `@tada5hi/*` configs, commit format, CI, and the release-please flow
+
+### Writing agent docs
+
+Keep the guides factual and focused on contracts a future change could silently break.
+
+- Keep existing commands, paths and factual descriptions current. Add guide content only for an invariant or cross-cutting rule. Put defect stories and verification details in the PR, and user-facing changes in the documentation site or release notes.
+- Keep subsystem detail in `.agents/topics/` and link it from the relevant guide.
+- Describe current behavior and cite issues or PRs, rather than local plan files or a running history of completed work.
+- `npm run lint` enforces the shared config's agent-doc size, import-budget and history checks. Preserve the critical contracts when splitting a guide.
 
 ## Commits, Issues & Pull Requests
 

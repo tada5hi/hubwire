@@ -35,6 +35,7 @@ describe('src/dispatcher/local', () => {
 
     it('should keep duplicate forwarded events', async () => {
         const component = new Component<TestEventMap>();
+
         component.mount('execute', async (data, ctx) => {
             await ctx.handle('executionFinished', data);
             await ctx.handle('executionFinished', data);
@@ -48,6 +49,7 @@ describe('src/dispatcher/local', () => {
     it('should hand forwarded events to the reply component', async () => {
         const recorded: unknown[] = [];
         const inbox = new Component<TestEventMap>();
+
         inbox.mount('executionFinished', (data, ctx) => {
             recorded.push(data, ctx.metadata.correlationId);
         });
@@ -60,11 +62,17 @@ describe('src/dispatcher/local', () => {
 
     it('should reject when a handler throws', async () => {
         const component = new Component<TestEventMap>();
-        component.mount('execute', () => { throw new Error('x'); });
+
+        component.mount('execute', () => {
+            throw new Error('x');
+        });
         await expect(new LocalDispatcher(component).dispatch('execute', { id: 'a' })).rejects.toThrow('x');
 
         const inbox = new Component<TestEventMap>();
-        inbox.mount('executionFinished', () => { throw new Error('x'); });
+
+        inbox.mount('executionFinished', () => {
+            throw new Error('x');
+        });
         await expect(new LocalDispatcher(new TestComponent(), { reply: inbox }).dispatch('execute', { id: 'a' }))
             .rejects.toThrow('x');
     });

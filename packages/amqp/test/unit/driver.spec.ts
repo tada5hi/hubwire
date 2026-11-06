@@ -18,14 +18,14 @@ import { hubWireFixture } from './fixtures/hub-wire';
 const shapes = {
     work: { type: 'work', key: 'tasks' },
     workOrdered: {
-        type: 'work', 
-        key: 'replies', 
-        ordered: true, 
+        type: 'work',
+        key: 'replies',
+        ordered: true,
     },
     pubSubNamespace: {
-        type: 'pubSub', 
-        key: 'events', 
-        namespace: 'custom', 
+        type: 'pubSub',
+        key: 'events',
+        namespace: 'custom',
     },
     pubSub: { type: 'pubSub', key: 'events' },
 } satisfies Record<string, MessageRouting>;
@@ -93,6 +93,7 @@ describe('src/module', () => {
 
             const [expected] = hubWireFixture[name];
             const [actual] = client.publishes;
+
             expect({ op: 'publish', ...actual }).toEqual(expected);
         });
 
@@ -104,12 +105,14 @@ describe('src/module', () => {
 
             const [, expected] = hubWireFixture[name];
             const [actual] = client.consumes;
+
             expect(actual?.exchange).toEqual(expected.exchange);
             expect(actual?.key).toEqual(expected.key);
 
             // hub retried in the driver; the retry now lives in amqp-extension (WORK only)
             const isWork = routing.type === 'work';
             const { onError, ...options } = actual?.options ?? {};
+
             expect(options).toEqual({
                 ...expected.options,
                 ...(isWork ? { retry } : {}),
@@ -122,12 +125,18 @@ describe('src/module', () => {
         // x-attempt header (pinned by its own retry spec), so only the body is pinned here.
         it('should move only the retry counter out of the body', async () => {
             const client = new FakeAmqpClient();
+
             await createDriver(client).publish(shapes.work, message(shapes.work));
+
             const [published] = client.publishes;
-            if (!published) throw new Error('nothing published');
+
+            if (!published) {
+                throw new Error('nothing published');
+            }
 
             const [hubRetry] = hubWireFixture.workRetry;
             const hubBody: Message & { metadata: { attempt?: number } } = JSON.parse(hubRetry.body);
+
             expect(hubBody.metadata.attempt).toBe(2);
             delete hubBody.metadata.attempt;
 
@@ -164,13 +173,18 @@ describe('src/module', () => {
         const seen: Message[] = [];
         const subscription: MessageRouting = { ...shapes.pubSubNamespace, queue: 'hub-events' };
 
-        await driver.consume(subscription, (received) => { seen.push(received); });
+        await driver.consume(subscription, (received) => {
+            seen.push(received);
+        });
         await driver.publish(subscription, message(subscription));
 
         const [consumed] = client.consumes;
+
         expect(consumed?.exchange).toEqual({ type: 'topic', name: 'custom' });
         expect(consumed?.key).toBe('events');
+
         const { onError, ...options } = consumed?.options ?? {};
+
         expect(options).toEqual({
             prefetchCount: 1,
             requeueOnFailure: true,
@@ -182,6 +196,7 @@ describe('src/module', () => {
         expect(client.publishes[0]?.options).not.toHaveProperty('queue');
 
         const content = Buffer.from(JSON.stringify(message(subscription)));
+
         await consumed?.handler({ content, properties: { headers: { 'x-attempt': 2 } } });
         expect(seen[0]?.metadata.delivery).toEqual({ attempt: 2, maxAttempts: 3 });
     });
@@ -195,9 +210,12 @@ describe('src/module', () => {
         await createDriver(client).publish(routing, message(routing));
 
         const [consumed] = client.consumes;
+
         expect(consumed?.exchange).toEqual({ type: 'direct', name: '' });
         expect(consumed?.key).toBe('custom/tasks');
+
         const { onError, ...options } = consumed?.options ?? {};
+
         expect(options).toEqual({
             prefetchCount: 1,
             requeueOnFailure: true,
@@ -206,6 +224,7 @@ describe('src/module', () => {
         expect(typeof onError).toBe('function');
 
         const [published] = client.publishes;
+
         expect(published?.exchange).toEqual({ type: 'direct', name: '' });
         expect(published?.key).toBe('custom/tasks');
         expect(published?.options).toEqual({
@@ -232,14 +251,24 @@ describe('src/module', () => {
         const client = new FakeAmqpClient();
         const retried: unknown[] = [];
         const dropped: unknown[] = [];
+
         await createDriver(client, {
-            onRetry: (failure) => { retried.push(failure); },
-            onDrop: (failure) => { dropped.push(failure); },
+            onRetry: (failure) => {
+                retried.push(failure);
+            },
+            onDrop: (failure) => {
+                dropped.push(failure);
+            },
         }).consume(shapes.work, () => {});
+
         const { onError } = client.consumes[0]?.options ?? {};
-        if (!onError) throw new Error('no onError');
+
+        if (!onError) {
+            throw new Error('no onError');
+        }
 
         const failure = new Error('boom');
+
         await onError(failure, toConsumeMessage('execute', 'msg-1'));
         await onError(ClientError.attemptsExhausted('execute', failure), toConsumeMessage('execute', 'msg-1', undefined, 5));
 
@@ -261,12 +290,21 @@ describe('src/module', () => {
         const client = new FakeAmqpClient();
         const retried: unknown[] = [];
         const malformed: unknown[] = [];
+
         await createDriver(client, {
-            onRetry: (failure) => { retried.push(failure); },
-            onMalformed: (delivery) => { malformed.push(delivery); },
+            onRetry: (failure) => {
+                retried.push(failure);
+            },
+            onMalformed: (delivery) => {
+                malformed.push(delivery);
+            },
         }).consume(shapes.work, () => {});
+
         const { onError } = client.consumes[0]?.options ?? {};
-        if (!onError) throw new Error('no onError');
+
+        if (!onError) {
+            throw new Error('no onError');
+        }
 
         await onError(new Error('boom'), toConsumeMessage('execute', 'msg-1', Buffer.from('{}')));
 
@@ -277,13 +315,17 @@ describe('src/module', () => {
     it('should hand a WORK handler its delivery attempt from the x-attempt header and maxAttempts', async () => {
         const client = new FakeAmqpClient();
         const seen: Message[] = [];
+
         await new AmqpMessageBusDriver({
             client,
             defaultTopicExchange: 'FLAME',
             maxAttempts: 3,
-        }).consume(shapes.work, (received) => { seen.push(received); });
+        }).consume(shapes.work, (received) => {
+            seen.push(received);
+        });
 
         const content = Buffer.from(JSON.stringify(message(shapes.work)));
+
         await client.consumes[0]?.handler({ content, properties: { headers: { 'x-attempt': 3 } } });
         await client.consumes[0]?.handler({ content, properties: {} });
 
@@ -296,9 +338,13 @@ describe('src/module', () => {
     it('should override delivery info in the body of a message', async () => {
         const client = new FakeAmqpClient();
         const seen: Message[] = [];
-        await createDriver(client).consume(shapes.work, (received) => { seen.push(received); });
+
+        await createDriver(client).consume(shapes.work, (received) => {
+            seen.push(received);
+        });
 
         const forged = message(shapes.work);
+
         forged.metadata.delivery = { attempt: 4, maxAttempts: 4 };
         await client.consumes[0]?.handler({ content: Buffer.from(JSON.stringify(forged)), properties: {} });
 
@@ -308,7 +354,10 @@ describe('src/module', () => {
     it('should report attempt 1 of 1 on a PUB_SUB message (not retried)', async () => {
         const client = new FakeAmqpClient();
         const seen: Message[] = [];
-        await createDriver(client).consume(shapes.pubSub, (received) => { seen.push(received); });
+
+        await createDriver(client).consume(shapes.pubSub, (received) => {
+            seen.push(received);
+        });
 
         await client.consumes[0]?.handler({ content: Buffer.from(JSON.stringify(message(shapes.pubSub))), properties: { headers: { 'x-attempt': 3 } } });
 
@@ -317,7 +366,10 @@ describe('src/module', () => {
 
     it('should let a handler error reach amqp-extension (which retries or nacks)', async () => {
         const client = new FakeAmqpClient();
-        await createDriver(client).consume(shapes.work, () => { throw new Error('boom'); });
+
+        await createDriver(client).consume(shapes.work, () => {
+            throw new Error('boom');
+        });
 
         await expect(client.consumes[0]?.handler({ content: Buffer.from(JSON.stringify(message(shapes.work))), properties: {} }))
             .rejects.toThrow('boom');
@@ -327,11 +379,19 @@ describe('src/module', () => {
         const client = new FakeAmqpClient();
         const malformed: AmqpMalformedMessage[] = [];
         const seen: Message[] = [];
-        await createDriver(client, { onMalformed: (delivery) => { malformed.push(delivery); } })
-            .consume(shapes.work, (received) => { seen.push(received); });
+
+        await createDriver(client, {
+            onMalformed: (delivery) => {
+                malformed.push(delivery);
+            },
+        })
+            .consume(shapes.work, (received) => {
+                seen.push(received);
+            });
 
         const unparsable = Buffer.from('{nope');
         const shapeless = Buffer.from(JSON.stringify({ id: 1 }));
+
         await client.consumes[0]?.handler({ content: unparsable, properties: {} });
         await client.consumes[0]?.handler({ content: shapeless, properties: {} });
 
@@ -344,7 +404,12 @@ describe('src/module', () => {
 
     it('should still ack a malformed message when onMalformed throws', async () => {
         const client = new FakeAmqpClient();
-        await createDriver(client, { onMalformed: () => { throw new Error('hook'); } })
+
+        await createDriver(client, {
+            onMalformed: () => {
+                throw new Error('hook');
+            },
+        })
             .consume(shapes.work, () => {});
 
         await expect(client.consumes[0]?.handler({ content: Buffer.from('{nope'), properties: {} })).resolves.toBeUndefined();
@@ -370,6 +435,7 @@ describe('src/module', () => {
     it('should honour an explicit persistent flag', async () => {
         const client = new FakeAmqpClient();
         const input = message(shapes.work);
+
         input.metadata.persistent = false;
 
         await createDriver(client).publish(shapes.work, input);
@@ -381,6 +447,7 @@ describe('src/module', () => {
         const client = new FakeAmqpClient();
         const routing: MessageRouting = { ...shapes.pubSub, persistent: true };
         const opted = message(routing);
+
         opted.metadata.persistent = false;
 
         await createDriver(client).publish(routing, message(routing));
@@ -393,6 +460,7 @@ describe('src/module', () => {
         const client = FakeAmqpClient.loopback();
         const messageBus = new MessageBus({ driver: createDriver(client) });
         const component = new Component();
+
         component.mount('execute', async (data, ctx) => {
             await ctx.handle('executed', data);
         });
@@ -403,6 +471,7 @@ describe('src/module', () => {
         }).start();
 
         const command = message(shapes.work);
+
         command.metadata.persistent = false;
         await messageBus.publish(command);
         await tick();
@@ -417,10 +486,15 @@ describe('src/module', () => {
         const client = new FakeAmqpClient();
         const driver = createDriver(client);
         const later = message(shapes.work);
+
         later.metadata.expiresAt = Date.now() + 60_000;
+
         const past = message(shapes.work);
+
         past.metadata.expiresAt = 0;
+
         const fractional = message(shapes.work);
+
         fractional.metadata.expiresAt = Date.now() + 1000 / 3;
 
         await driver.publish(shapes.work, later);
@@ -429,6 +503,7 @@ describe('src/module', () => {
         await driver.publish(shapes.work, fractional);
 
         const [first, second, third, fourth] = client.publishes.map((entry) => entry.options.expiration);
+
         expect(Number(first)).toBeGreaterThan(59_000);
         expect(Number(first)).toBeLessThanOrEqual(60_000);
         expect(first).toBeTypeOf('string');
@@ -441,6 +516,7 @@ describe('src/module', () => {
     it('should close the client', async () => {
         const client = new FakeAmqpClient();
         const driver = createDriver(client);
+
         await driver.publish(shapes.work, message(shapes.work));
 
         await driver.close();

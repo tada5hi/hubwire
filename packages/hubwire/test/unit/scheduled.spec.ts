@@ -8,7 +8,9 @@ import {
 import { MemoryScheduleLock } from '@hubwire/test';
 import { defineScheduledComponent } from '../../src';
 
-const wait = (ms: number) => new Promise((resolve) => { setTimeout(resolve, ms); });
+const wait = (ms: number) => new Promise((resolve) => {
+    setTimeout(resolve, ms);
+});
 
 describe('src/component/scheduled', () => {
     it('should never reject start() when the first pass fails, and report it to onError', async () => {
@@ -16,9 +18,16 @@ describe('src/component/scheduled', () => {
         const failure = new Error('x');
         const c = defineScheduledComponent({
             schedule: '0 0 1 1 *',
-            hooks: { onError: (error) => { errors.push(error); } },
-            run: async () => { throw failure; },
+            hooks: {
+                onError: (error) => {
+                    errors.push(error);
+                },
+            },
+            run: async () => {
+                throw failure;
+            },
         });
+
         await expect(c.start()).resolves.toBeUndefined();
         expect(c.status().lastSuccessAt).toBeUndefined();
         expect(c.status().runningSince).toBeUndefined();
@@ -29,9 +38,16 @@ describe('src/component/scheduled', () => {
     it('should still resolve start() when onError throws', async () => {
         const c = defineScheduledComponent({
             schedule: '0 0 1 1 *',
-            hooks: { onError: () => { throw new Error('hook'); } },
-            run: async () => { throw new Error('x'); },
+            hooks: {
+                onError: () => {
+                    throw new Error('hook');
+                },
+            },
+            run: async () => {
+                throw new Error('x');
+            },
         });
+
         await expect(c.start()).resolves.toBeUndefined();
         await c.stop();
     });
@@ -43,10 +59,12 @@ describe('src/component/scheduled', () => {
             schedule: '* * * * * *', // every second
             run: () => {
                 passes++;
+
                 return passes === 1 ? firstPass.promise : Promise.resolve();
             },
         });
         const started = c.start();
+
         expect(c.status().runningSince).toBeTypeOf('number');
         await c.stop();
         firstPass.resolve();
@@ -72,6 +90,7 @@ describe('src/component/scheduled', () => {
         });
 
         const started = Promise.all([c.start(), c.start()]);
+
         gate.resolve();
         await started;
 
@@ -82,6 +101,7 @@ describe('src/component/scheduled', () => {
 
     it('should record a successful pass', async () => {
         const c = defineScheduledComponent({ schedule: '0 0 1 1 *', run: async () => {} });
+
         await c.start();
         expect(c.status().lastSuccessAt).toBeTypeOf('number');
         await c.stop();
@@ -92,20 +112,31 @@ describe('src/component/scheduled', () => {
         const c = defineScheduledComponent({
             schedule: '* * * * * *',
             runOnStart: false,
-            run: async () => { passes++; },
+            run: async () => {
+                passes++;
+            },
         });
+
         await c.start();
         expect(passes).toBe(0);
         await wait(1100);
         await c.stop();
+
         const seen = passes;
+
         expect(seen).toBeGreaterThanOrEqual(1);
         await wait(1100);
         expect(passes).toBe(seen);
     });
     it('should reject an invalid cron expression at definition, before any pass', () => {
         let passes = 0;
-        expect(() => defineScheduledComponent({ schedule: 'nope', run: async () => { passes++; } }))
+
+        expect(() => defineScheduledComponent({
+            schedule: 'nope',
+            run: async () => {
+                passes++;
+            },
+        }))
             .toThrow('nope');
         expect(passes).toBe(0);
     });
@@ -115,11 +146,16 @@ describe('src/component/scheduled', () => {
         let done = false;
         const c = defineScheduledComponent({
             schedule: '0 0 1 1 *',
-            run: async () => { await gate.promise; done = true; },
+            run: async () => {
+                await gate.promise; done = true;
+            },
         });
         const started = c.start();
+
         await c.stop();
+
         const settled = c.settled().then(() => done);
+
         gate.resolve();
         await expect(settled).resolves.toBe(true);
         await started;
@@ -138,20 +174,24 @@ describe('src/component/scheduled', () => {
                 done = true;
             },
         });
+
         await c.start();
         await entered.promise;
         await c.stop();
+
         const settled = c.settled().then(() => done);
+
         gate.resolve();
         await expect(settled).resolves.toBe(true);
     });
 
     it('should resolve settled() at once when no pass is running', async () => {
         const c = defineScheduledComponent({
-            schedule: '0 0 1 1 *', 
-            runOnStart: false, 
-            run: async () => {}, 
+            schedule: '0 0 1 1 *',
+            runOnStart: false,
+            run: async () => {},
         });
+
         await c.settled();
         await c.start();
         await c.settled();
@@ -162,8 +202,11 @@ describe('src/component/scheduled', () => {
     it('should settle a pass that stops its own component', async () => {
         const c = defineScheduledComponent({
             schedule: '0 0 1 1 *',
-            run: async () => { await c.stop(); },
+            run: async () => {
+                await c.stop();
+            },
         });
+
         void c.start();
         await c.settled();
         expect(c.status().runningSince).toBeUndefined();
@@ -177,6 +220,7 @@ describe('src/component/scheduled', () => {
 
         it('should settle and stay unscheduled when a pass stops its own component', async () => {
             vi.useFakeTimers({ now: new Date('2026-01-15T10:00:00.000Z') });
+
             const baseline = vi.getTimerCount();
             const awaited = defineScheduledComponent({
                 schedule: '0 0 1 1 *',
@@ -187,7 +231,9 @@ describe('src/component/scheduled', () => {
             });
             const fired = defineScheduledComponent({
                 schedule: '0 0 1 1 *',
-                run: async () => { void fired.stop(); },
+                run: async () => {
+                    void fired.stop();
+                },
             });
 
             await awaited.start();
@@ -198,8 +244,10 @@ describe('src/component/scheduled', () => {
 
         it('should not leave a timer behind after stop', async () => {
             vi.useFakeTimers({ now: new Date('2026-01-15T10:00:00.000Z') });
+
             const baseline = vi.getTimerCount();
             const c = defineScheduledComponent({ schedule: '0 0 1 1 *', run: async () => {} });
+
             await c.start();
             expect(vi.getTimerCount()).toBe(baseline + 1);
             await c.stop();
@@ -210,11 +258,15 @@ describe('src/component/scheduled', () => {
 
         it('should pass the start time as scheduledAt to the start pass', async () => {
             vi.useFakeTimers({ now: new Date('2026-01-15T10:00:00.250Z') });
+
             const seen: string[] = [];
             const c = defineScheduledComponent({
                 schedule: '0 0 1 1 *',
-                run: async ({ scheduledAt }) => { seen.push(scheduledAt.toISOString()); },
+                run: async ({ scheduledAt }) => {
+                    seen.push(scheduledAt.toISOString());
+                },
             });
+
             await c.start();
             await c.stop();
             expect(seen).toEqual(['2026-01-15T10:00:00.250Z']);
@@ -222,12 +274,16 @@ describe('src/component/scheduled', () => {
 
         it('should pass each tick\'s planned fire time as scheduledAt', async () => {
             vi.useFakeTimers({ now: new Date('2026-01-15T10:00:00.500Z') });
+
             const seen: string[] = [];
             const c = defineScheduledComponent({
                 schedule: '* * * * * *',
                 runOnStart: false,
-                run: async ({ scheduledAt }) => { seen.push(scheduledAt.toISOString()); },
+                run: async ({ scheduledAt }) => {
+                    seen.push(scheduledAt.toISOString());
+                },
             });
+
             await c.start();
             await vi.advanceTimersByTimeAsync(3000);
             await c.stop();
@@ -240,12 +296,16 @@ describe('src/component/scheduled', () => {
 
         it('should pass the planned slot when the timer fires late', async () => {
             vi.useFakeTimers({ now: new Date('2026-01-15T10:00:00.500Z') });
+
             const seen: string[] = [];
             const c = defineScheduledComponent({
                 schedule: '* * * * * *',
                 runOnStart: false,
-                run: async ({ scheduledAt }) => { seen.push(`${scheduledAt.toISOString()}@${new Date().toISOString()}`); },
+                run: async ({ scheduledAt }) => {
+                    seen.push(`${scheduledAt.toISOString()}@${new Date().toISOString()}`);
+                },
             });
+
             await c.start();
             await vi.advanceTimersByTimeAsync(400);
             // the clock moves, the timer keeps its delay: it fires at 10:00:01.003
@@ -257,13 +317,17 @@ describe('src/component/scheduled', () => {
 
         it('should wait for a slot further away than one timer can', async () => {
             vi.useFakeTimers({ now: new Date('2026-01-15T10:00:00.000Z') });
+
             const seen: string[] = [];
             const c = defineScheduledComponent({
                 schedule: '0 0 1 3 *', // 1 March, ~45 days: above setTimeout's 2^31-1 ms
                 timezone: 'UTC',
                 runOnStart: false,
-                run: async ({ scheduledAt }) => { seen.push(scheduledAt.toISOString()); },
+                run: async ({ scheduledAt }) => {
+                    seen.push(scheduledAt.toISOString());
+                },
             });
+
             await c.start();
             // one uncapped timer would be clamped to 1 ms and fire now
             await vi.advanceTimersByTimeAsync(1000);
@@ -280,16 +344,20 @@ describe('src/component/scheduled', () => {
 
             it('should run each tick once across components sharing a lock', async () => {
                 vi.useFakeTimers({ now: NOW });
+
                 const lock = new MemoryScheduleLock();
                 const seen: string[] = [];
                 const define = () => defineScheduledComponent({
                     name: 'cleanup',
                     schedule: '* * * * * *',
                     lock,
-                    run: async ({ scheduledAt }) => { seen.push(scheduledAt.toISOString()); },
+                    run: async ({ scheduledAt }) => {
+                        seen.push(scheduledAt.toISOString());
+                    },
                 });
                 const a = define();
                 const b = define();
+
                 await a.start();
                 await b.start();
                 await vi.advanceTimersByTimeAsync(3000);
@@ -309,14 +377,18 @@ describe('src/component/scheduled', () => {
 
             it('should not run a start pass by default when a lock is set', async () => {
                 vi.useFakeTimers({ now: NOW });
+
                 const lock = new MemoryScheduleLock();
                 let passes = 0;
                 const c = defineScheduledComponent({
                     name: 'cleanup',
                     schedule: '* * * * * *',
                     lock,
-                    run: async () => { passes++; },
+                    run: async () => {
+                        passes++;
+                    },
                 });
+
                 await c.start();
                 await c.stop();
                 expect(passes).toBe(0);
@@ -325,6 +397,7 @@ describe('src/component/scheduled', () => {
 
             it('should run an explicit start pass without the lock', async () => {
                 vi.useFakeTimers({ now: NOW });
+
                 const lock = new MemoryScheduleLock();
                 const seen: string[] = [];
                 const c = defineScheduledComponent({
@@ -332,8 +405,11 @@ describe('src/component/scheduled', () => {
                     schedule: '* * * * * *',
                     lock,
                     runOnStart: true,
-                    run: async ({ scheduledAt }) => { seen.push(scheduledAt.toISOString()); },
+                    run: async ({ scheduledAt }) => {
+                        seen.push(scheduledAt.toISOString());
+                    },
                 });
+
                 await c.start();
                 await c.stop();
                 expect(seen).toEqual(['2026-01-15T10:00:00.500Z']);
@@ -342,17 +418,27 @@ describe('src/component/scheduled', () => {
 
             it('should skip a tick another holder owns and report it to onSkip', async () => {
                 vi.useFakeTimers({ now: NOW });
+
                 const lock = new MemoryScheduleLock();
+
                 await lock.acquire('cleanup:2026-01-15T10:00:01.000Z', 60_000);
+
                 const skipped: string[] = [];
                 let passes = 0;
                 const c = defineScheduledComponent({
                     name: 'cleanup',
                     schedule: '* * * * * *',
                     lock,
-                    hooks: { onSkip: (at) => { skipped.push(at.toISOString()); } },
-                    run: async () => { passes++; },
+                    hooks: {
+                        onSkip: (at) => {
+                            skipped.push(at.toISOString());
+                        },
+                    },
+                    run: async () => {
+                        passes++;
+                    },
                 });
+
                 await c.start();
                 await vi.advanceTimersByTimeAsync(1000);
                 await c.stop();
@@ -363,18 +449,28 @@ describe('src/component/scheduled', () => {
 
             it('should skip a tick that fires lockTtlMs or more late and report it to onSkip', async () => {
                 vi.useFakeTimers({ now: NOW });
+
                 const lock = new MemoryScheduleLock();
+
                 // another replica ran the tick on time; its key expires after 60 s
                 await lock.acquire('cleanup:2026-01-15T10:00:01.000Z', 60_000);
+
                 const skipped: string[] = [];
                 const seen: string[] = [];
                 const c = defineScheduledComponent({
                     name: 'cleanup',
                     schedule: '* * * * * *',
                     lock,
-                    hooks: { onSkip: (at) => { skipped.push(at.toISOString()); } },
-                    run: async ({ scheduledAt }) => { seen.push(scheduledAt.toISOString()); },
+                    hooks: {
+                        onSkip: (at) => {
+                            skipped.push(at.toISOString());
+                        },
+                    },
+                    run: async ({ scheduledAt }) => {
+                        seen.push(scheduledAt.toISOString());
+                    },
                 });
+
                 await c.start();
                 // the process stalls for 61 s before the :01 timer fires
                 vi.setSystemTime(Date.now() + 61_000);
@@ -390,18 +486,28 @@ describe('src/component/scheduled', () => {
 
             it('should fail closed when acquire rejects, report onError and retry next tick', async () => {
                 vi.useFakeTimers({ now: NOW });
+
                 const lock = new MemoryScheduleLock();
                 const failure = new Error('down');
+
                 lock.acquireError = failure;
+
                 const errors: unknown[] = [];
                 const seen: string[] = [];
                 const c = defineScheduledComponent({
                     name: 'cleanup',
                     schedule: '* * * * * *',
                     lock,
-                    hooks: { onError: (error) => { errors.push(error); } },
-                    run: async ({ scheduledAt }) => { seen.push(scheduledAt.toISOString()); },
+                    hooks: {
+                        onError: (error) => {
+                            errors.push(error);
+                        },
+                    },
+                    run: async ({ scheduledAt }) => {
+                        seen.push(scheduledAt.toISOString());
+                    },
                 });
+
                 await c.start();
                 await vi.advanceTimersByTimeAsync(1000);
                 expect(seen).toEqual([]);
@@ -414,14 +520,18 @@ describe('src/component/scheduled', () => {
 
             it('should not release a tick after its pass', async () => {
                 vi.useFakeTimers({ now: NOW });
+
                 const lock = new MemoryScheduleLock();
                 let passes = 0;
                 const c = defineScheduledComponent({
                     name: 'cleanup',
                     schedule: '* * * * * *',
                     lock,
-                    run: async () => { passes++; },
+                    run: async () => {
+                        passes++;
+                    },
                 });
+
                 await c.start();
                 await vi.advanceTimersByTimeAsync(1000);
                 await c.stop();
@@ -432,6 +542,7 @@ describe('src/component/scheduled', () => {
 
             it('should use lockTtlMs for the key', async () => {
                 vi.useFakeTimers({ now: NOW });
+
                 const lock = new MemoryScheduleLock();
                 const c = defineScheduledComponent({
                     name: 'cleanup',
@@ -440,6 +551,7 @@ describe('src/component/scheduled', () => {
                     lockTtlMs: 5000,
                     run: async () => {},
                 });
+
                 await c.start();
                 await vi.advanceTimersByTimeAsync(1000);
                 await c.stop();
@@ -448,16 +560,26 @@ describe('src/component/scheduled', () => {
 
             it('should ignore a throwing onSkip', async () => {
                 vi.useFakeTimers({ now: NOW });
+
                 const lock = new MemoryScheduleLock();
+
                 await lock.acquire('cleanup:2026-01-15T10:00:01.000Z', 60_000);
+
                 const seen: string[] = [];
                 const c = defineScheduledComponent({
                     name: 'cleanup',
                     schedule: '* * * * * *',
                     lock,
-                    hooks: { onSkip: () => { throw new Error('hook'); } },
-                    run: async ({ scheduledAt }) => { seen.push(scheduledAt.toISOString()); },
+                    hooks: {
+                        onSkip: () => {
+                            throw new Error('hook');
+                        },
+                    },
+                    run: async ({ scheduledAt }) => {
+                        seen.push(scheduledAt.toISOString());
+                    },
                 });
+
                 await c.start();
                 await vi.advanceTimersByTimeAsync(2000);
                 await c.stop();
@@ -466,16 +588,26 @@ describe('src/component/scheduled', () => {
 
             it('should ignore a throwing onError when acquire rejects', async () => {
                 vi.useFakeTimers({ now: NOW });
+
                 const lock = new MemoryScheduleLock();
+
                 lock.acquireError = new Error('down');
+
                 const seen: string[] = [];
                 const c = defineScheduledComponent({
                     name: 'cleanup',
                     schedule: '* * * * * *',
                     lock,
-                    hooks: { onError: () => { throw new Error('hook'); } },
-                    run: async ({ scheduledAt }) => { seen.push(scheduledAt.toISOString()); },
+                    hooks: {
+                        onError: () => {
+                            throw new Error('hook');
+                        },
+                    },
+                    run: async ({ scheduledAt }) => {
+                        seen.push(scheduledAt.toISOString());
+                    },
                 });
+
                 await c.start();
                 await vi.advanceTimersByTimeAsync(1000);
                 expect(seen).toEqual([]);
@@ -487,18 +619,24 @@ describe('src/component/scheduled', () => {
 
             it('should let settled() wait for an acquire in flight', async () => {
                 vi.useFakeTimers({ now: NOW });
+
                 const gate = Promise.withResolvers<boolean>();
                 let done = false;
                 const c = defineScheduledComponent({
                     name: 'cleanup',
                     schedule: '* * * * * *',
                     lock: { acquire: () => gate.promise },
-                    run: async () => { done = true; },
+                    run: async () => {
+                        done = true;
+                    },
                 });
+
                 await c.start();
                 await vi.advanceTimersByTimeAsync(1000); // the tick at :01 is now inside acquire()
                 await c.stop();
+
                 const settled = c.settled().then(() => done);
+
                 gate.resolve(true);
                 // a stop() during acquire does not cancel the pass, like a pass in flight
                 await expect(settled).resolves.toBe(true);
@@ -512,6 +650,7 @@ describe('src/component/scheduled', () => {
 
             it('should fire in the given timezone', async () => {
                 vi.useFakeTimers({ now: new Date('2026-01-14T16:59:59.500Z') });
+
                 const seen: string[] = [];
                 const c = defineScheduledComponent({
                     schedule: '0 2 * * *',
@@ -519,6 +658,7 @@ describe('src/component/scheduled', () => {
                     runOnStart: false,
                     run: collect(seen),
                 });
+
                 await c.start();
                 await vi.advanceTimersByTimeAsync(1000);
                 await c.stop();
@@ -527,6 +667,7 @@ describe('src/component/scheduled', () => {
 
             it('should run a local time the spring-forward change skips one hour later', async () => {
                 vi.useFakeTimers({ now: new Date('2026-03-29T00:00:00.500Z') });
+
                 const seen: string[] = [];
                 const c = defineScheduledComponent({
                     schedule: '30 2 * * *',
@@ -534,6 +675,7 @@ describe('src/component/scheduled', () => {
                     runOnStart: false,
                     run: collect(seen),
                 });
+
                 await c.start();
                 await vi.advanceTimersByTimeAsync(48 * 60 * 60 * 1000);
                 await c.stop();
@@ -545,6 +687,7 @@ describe('src/component/scheduled', () => {
 
             it('should run the repeated hour of a fall-back change once', async () => {
                 vi.useFakeTimers({ now: new Date('2026-10-25T00:40:00.500Z') });
+
                 const seen: string[] = [];
                 const c = defineScheduledComponent({
                     schedule: '*/15 * * * *',
@@ -552,6 +695,7 @@ describe('src/component/scheduled', () => {
                     runOnStart: false,
                     run: collect(seen),
                 });
+
                 await c.start();
                 await vi.advanceTimersByTimeAsync(100 * 60 * 1000);
                 await c.stop();
@@ -565,6 +709,7 @@ describe('src/component/scheduled', () => {
             it('should wait out a repeated hour it was started in, without spinning', async () => {
                 // 01:10 EST, the second occurrence of 01:xx: croner answers nextRun() with a past instant here
                 vi.useFakeTimers({ now: new Date('2026-11-01T06:10:00.500Z') });
+
                 const seen: string[] = [];
                 const c = defineScheduledComponent({
                     schedule: '*/15 * * * *',
@@ -572,6 +717,7 @@ describe('src/component/scheduled', () => {
                     runOnStart: false,
                     run: collect(seen),
                 });
+
                 await c.start();
                 await vi.advanceTimersByTimeAsync(100);
                 expect(seen).toEqual([]);
@@ -585,10 +731,13 @@ describe('src/component/scheduled', () => {
 
     it('should reject an invalid timezone at definition, before any pass', () => {
         let passes = 0;
+
         expect(() => defineScheduledComponent({
             schedule: '* * * * *',
             timezone: 'Mars/Olympus',
-            run: async () => { passes++; },
+            run: async () => {
+                passes++;
+            },
         })).toThrow('Mars/Olympus');
         expect(passes).toBe(0);
     });

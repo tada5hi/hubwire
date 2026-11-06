@@ -29,10 +29,12 @@ export class RemoteWorker<
             await component.start();
 
             let consumer;
+
             try {
                 consumer = await options.messageBus.consumeAny(options.consume, (message) => this.consume(message));
             } catch (e) {
                 await component.stop().catch(() => {});
+
                 throw e;
             }
 
@@ -61,9 +63,9 @@ export class RemoteWorker<
 
     protected async consume(message: Message): Promise<void> {
         const {
-            messageBus, 
-            publish, 
-            hooks, 
+            messageBus,
+            publish,
+            hooks,
         } = this.options;
         const event = fromMessage<EventMap>(message);
 
@@ -74,8 +76,10 @@ export class RemoteWorker<
                     data,
                     metadata: ctx.metadata,
                 };
+
                 if (!publish) {
                     invokeHook(hooks, 'onUnrouted', forwarded);
+
                     return;
                 }
 

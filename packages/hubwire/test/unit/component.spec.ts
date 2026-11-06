@@ -50,14 +50,20 @@ describe('src/component', () => {
 
     it('should resolve an unknown key with no "*" and no options.handle', async () => {
         const component = new Component();
+
         await expect(component.handle('nope', {})).resolves.toBeUndefined();
     });
 
     it('should prefer a specific handler over "*"', async () => {
         const calls: string[] = [];
         const component = new Component<{ run: Ev, other: Ev }>();
-        component.mount('*', (_data, ctx) => { calls.push(`*:${ctx.key}`); });
-        component.mount('run', () => { calls.push('run'); });
+
+        component.mount('*', (_data, ctx) => {
+            calls.push(`*:${ctx.key}`);
+        });
+        component.mount('run', () => {
+            calls.push('run');
+        });
 
         await component.handle('run', {});
         await component.handle('other', {});
@@ -71,23 +77,39 @@ describe('src/component', () => {
     it('should route an unhandled child event to options.handle', async () => {
         const replies: string[] = [];
         const component = new Component<{ run: Ev, done: Ev }>();
+
         component.mount('run', (_data, ctx) => ctx.handle('done', {}));
-        await component.handle('run', {}, {}, { handle: (_d, ctx) => { replies.push(ctx.key); } });
+        await component.handle('run', {}, {}, {
+            handle: (_d, ctx) => {
+                replies.push(ctx.key);
+            },
+        });
         expect(replies).toEqual(['done']);
     });
 
     it('should merge the parent metadata into a child event', async () => {
         let metadata: Record<string, unknown> | undefined;
         const component = new Component<{ run: Ev, done: Ev }>();
+
         component.mount('run', (_data, ctx) => ctx.handle('done', {}, { b: 2 }));
-        await component.handle('run', {}, { a: 1 }, { handle: (_d, ctx) => { metadata = ctx.metadata; } });
+        await component.handle('run', {}, { a: 1 }, {
+            handle: (_d, ctx) => {
+                metadata = ctx.metadata;
+            },
+        });
         expect(metadata).toEqual({ a: 1, b: 2 });
     });
 
     it('should initialize handlers once', async () => {
         let calls = 0;
         const component = new Component<{ run: Ev }>();
-        component.mount('run', { initialize: () => { calls++; }, handle: () => {} });
+
+        component.mount('run', {
+            initialize: () => {
+                calls++;
+            },
+            handle: () => {},
+        });
         await Promise.all([component.handle('run', {}), component.handle('run', {})]);
         await component.handle('run', {});
         expect(calls).toBe(1);
@@ -96,9 +118,20 @@ describe('src/component', () => {
     it('should initialize a handler mounted after the first call', async () => {
         const calls: string[] = [];
         const component = new Component<{ a: [{}, {}], b: [{}, {}] }>();
-        component.mount('a', { initialize: () => { calls.push('a'); }, handle: () => {} });
+
+        component.mount('a', {
+            initialize: () => {
+                calls.push('a');
+            },
+            handle: () => {},
+        });
         await component.handle('a', {});
-        component.mount('b', { initialize: () => { calls.push('b'); }, handle: () => {} });
+        component.mount('b', {
+            initialize: () => {
+                calls.push('b');
+            },
+            handle: () => {},
+        });
         await component.handle('b', {});
         await component.handle('a', {});
         expect(calls).toEqual(['a', 'b']);
@@ -107,9 +140,11 @@ describe('src/component', () => {
     it('should retry initialize after a failed attempt', async () => {
         let calls = 0;
         const component = new Component<{ run: Ev }>();
+
         component.mount('run', {
             initialize: () => {
                 calls++;
+
                 if (calls === 1) {
                     throw new Error('x');
                 }
@@ -123,6 +158,7 @@ describe('src/component', () => {
 
     it('should track lastSuccessAt for top-level calls', async () => {
         const component = new Component<{ run: Ev }>();
+
         component.mount('run', () => {});
         expect(component.status().lastSuccessAt).toBeUndefined();
         await component.handle('run', {});
@@ -133,12 +169,16 @@ describe('src/component', () => {
     it('should report runningSince while a call is in flight and not stamp a failure', async () => {
         let release!: () => void;
         const component = new Component<{ run: Ev }>();
+
         component.mount('run', () => new Promise<void>((_resolve, reject) => {
             release = () => reject(new Error('boom'));
         }));
 
         const pending = component.handle('run', {});
-        await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+        await new Promise((resolve) => {
+            setTimeout(resolve, 0);
+        });
         expect(component.status().runningSince).toBeTypeOf('number');
 
         release();
@@ -149,6 +189,7 @@ describe('src/component', () => {
 
     it('should start and stop as no-ops', async () => {
         const component = new Component();
+
         await expect(component.start()).resolves.toBeUndefined();
         await expect(component.stop()).resolves.toBeUndefined();
     });
