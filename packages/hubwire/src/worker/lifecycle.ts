@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/prefer-promise-try -- Keep compatibility with the published Node.js runtime requirement. */
 type Release = () => Promise<void>;
 
 /**
@@ -18,13 +19,16 @@ export function createLifecycle(acquire: () => Promise<Release>) {
         }
 
         const current = state;
+
         state = undefined;
+
         const released = (async () => {
             if (!current) {
                 return;
             }
 
             let release: Release;
+
             try {
                 release = await current;
             } catch {
@@ -33,7 +37,10 @@ export function createLifecycle(acquire: () => Promise<Release>) {
 
             await release();
         })();
-        settled = released.catch(() => {}).then(() => { settled = undefined; });
+
+        settled = released.catch(() => {}).then(() => {
+            settled = undefined;
+        });
 
         return released;
     };
@@ -48,6 +55,7 @@ export function createLifecycle(acquire: () => Promise<Release>) {
             if (!state) {
                 // acquire's body runs a microtask later: a stop() it makes re-entrantly sees the state
                 const current = Promise.resolve().then(acquire);
+
                 state = current;
                 current.catch(() => {
                     if (state === current) {

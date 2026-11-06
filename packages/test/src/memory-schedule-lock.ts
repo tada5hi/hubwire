@@ -21,6 +21,7 @@ export class MemoryScheduleLock implements IScheduleLock {
 
         // check and write without an await in between: two callers cannot both win
         const now = Date.now();
+
         for (const [held, expiresAt] of this.expiries) {
             if (expiresAt <= now) {
                 this.expiries.delete(held);
@@ -33,6 +34,7 @@ export class MemoryScheduleLock implements IScheduleLock {
 
         this.expiries.set(key, now + ttlMs);
         this.acquired.push({ key, ttlMs });
+
         return true;
     }
 }

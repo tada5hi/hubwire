@@ -42,14 +42,17 @@ export class MessageBus implements IMessageBus {
             // a retried or requeued message keeps its age, so every driver is covered here
             if (message.metadata.expiresAt !== undefined && message.metadata.expiresAt <= Date.now()) {
                 invokeHook(this.hooks, 'onExpired', message, routing);
+
                 return;
             }
 
             // own keys only: a type such as 'toString' must not hit Object.prototype
             const handler = (Object.hasOwn(handlers, message.type) ? handlers[message.type] : undefined) ??
                 handlers['*'];
+
             if (!handler) {
                 invokeHook(this.hooks, 'onUnhandled', message, routing);
+
                 return;
             }
 
@@ -57,6 +60,7 @@ export class MessageBus implements IMessageBus {
                 await handler(message);
             } catch (e) {
                 invokeHook(this.hooks, 'onError', e, message, routing);
+
                 throw e;
             }
         });

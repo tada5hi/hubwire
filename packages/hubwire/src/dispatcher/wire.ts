@@ -21,6 +21,7 @@ export function toMessage(
     routing: MessageRouting,
 ): Message {
     const rest = { ...metadata };
+
     delete rest.delivery;
     // an older hub producer's body counter: an older consumer would retry by it
     delete rest.attempt;
@@ -39,6 +40,7 @@ export function toMessage(
  */
 export function toForwardedMessage(event: ForwardedEvent, routing: MessageRouting): Message {
     const metadata = { ...event.metadata };
+
     delete metadata.persistent;
     delete metadata.expiresAt;
 

@@ -12,12 +12,14 @@ export function invokeHook<H extends object, K extends keyof H>(
     ...args: HookArgs<NonNullable<H[K]>>
 ): void {
     const hook = hooks?.[name];
+
     if (typeof hook !== 'function') {
         return;
     }
 
     try {
         const result: unknown = hook.apply(hooks, args);
+
         if (result instanceof Promise) {
             result.catch(() => {});
         }

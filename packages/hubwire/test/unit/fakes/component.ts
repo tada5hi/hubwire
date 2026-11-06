@@ -24,6 +24,7 @@ export class TestComponent extends Component<TestEventMap> {
             if (this.blocker) {
                 await this.blocker;
             }
+
             this.handled.push(value.id);
             await context.handle('executionFinished', value);
         });
