@@ -239,7 +239,11 @@ describe('src/component/interval', () => {
         await drain();
         expect(passes).toEqual([1000]);
         expect(clock.timerCount).toBe(0);
-        expect(c.status()).toEqual({ lastSuccessAt: START + 1000, runningSince: undefined });
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 1000, 
+            lastRunAt: START + 1000, 
+            runningSince: undefined, 
+        });
         await c.settled();
         clock.advance(10_000);
         await drain();
@@ -377,6 +381,101 @@ describe('src/component/interval', () => {
         await drain();
         expect(passes).toBe(4);
         expect(c.status().lastSuccessAt).toBe(START + 4000);
+        await c.stop();
+    });
+
+    it('should set lastErrorAt and lastRunAt for a failed pass and leave lastSuccessAt', async () => {
+        const clock = new FakeClock(START);
+        let passes = 0;
+        const c = defineIntervalComponent({
+            intervalMs: 1000,
+            clock,
+            handler: () => {
+                passes++;
+
+                if (passes === 2) {
+                    throw new Error('x');
+                }
+            },
+        });
+
+        await c.start();
+        clock.advance(1000);
+        await drain();
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 1000, 
+            lastRunAt: START + 1000, 
+            runningSince: undefined, 
+        });
+        clock.advance(1000);
+        await drain();
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 1000,
+            lastErrorAt: START + 2000,
+            lastRunAt: START + 2000,
+            runningSince: undefined,
+        });
+        clock.advance(1000);
+        await drain();
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 3000,
+            lastErrorAt: START + 2000,
+            lastRunAt: START + 3000,
+            runningSince: undefined,
+        });
+        await c.stop();
+    });
+
+    it('should pass the component\'s name to onError', async () => {
+        const clock = new FakeClock(START);
+        const failure = new Error('x');
+        const seen: unknown[][] = [];
+        const define = (name?: string) => defineIntervalComponent({
+            name,
+            intervalMs: 1000,
+            runOnStart: true,
+            clock,
+            hooks: {
+                onError: (error, context) => {
+                    seen.push([error, context]);
+                },
+            },
+            handler: () => {
+                throw failure;
+            },
+        });
+        const named = define('purge');
+        const anonymous = define();
+
+        await named.start();
+        await anonymous.start();
+        await named.stop();
+        await anonymous.stop();
+        expect(seen).toEqual([[failure, { name: 'purge' }], [failure, { name: undefined }]]);
+    });
+
+    it('should record a failed pass when onError throws', async () => {
+        const clock = new FakeClock(START);
+        const c = defineIntervalComponent({
+            intervalMs: 1000,
+            runOnStart: true,
+            clock,
+            hooks: {
+                onError: () => {
+                    throw new Error('hook');
+                },
+            },
+            handler: () => {
+                throw new Error('x');
+            },
+        });
+
+        await expect(c.start()).resolves.toBeUndefined();
+        expect(c.status()).toEqual({
+            lastErrorAt: START, 
+            lastRunAt: START, 
+            runningSince: undefined, 
+        });
         await c.stop();
     });
 
@@ -878,7 +977,11 @@ describe('src/component/interval', () => {
         await drain();
         expect(passes).toBe(1);
         expect(clock.timerCount).toBe(0);
-        expect(c.status()).toEqual({ lastSuccessAt: START + 1000, runningSince: undefined });
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 1000, 
+            lastRunAt: START + 1000, 
+            runningSince: undefined, 
+        });
     });
 
     it('should resolve settled() at once when no pass is running', async () => {
@@ -1008,7 +1111,11 @@ describe('src/component/interval', () => {
         clock.advance(250);
         gate.resolve();
         await drain();
-        expect(c.status()).toEqual({ lastSuccessAt: START + 1250, runningSince: undefined });
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 1250, 
+            lastRunAt: START + 1250, 
+            runningSince: undefined, 
+        });
         await c.stop();
     });
 

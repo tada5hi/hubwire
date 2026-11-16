@@ -434,8 +434,8 @@ describe('src/component/scheduled', () => {
                     schedule: '* * * * * *',
                     lock,
                     hooks: {
-                        onSkip: (at) => {
-                            skipped.push(at.toISOString());
+                        onSkip: (at, context) => {
+                            skipped.push(`${at.toISOString()} ${context.scheduledAt.toISOString()} ${context.name} ${context.reason}`);
                         },
                     },
                     run: async () => {
@@ -447,7 +447,7 @@ describe('src/component/scheduled', () => {
                 await vi.advanceTimersByTimeAsync(1000);
                 await c.stop();
                 expect(passes).toBe(0);
-                expect(skipped).toEqual(['2026-01-15T10:00:01.000Z']);
+                expect(skipped).toEqual(['2026-01-15T10:00:01.000Z 2026-01-15T10:00:01.000Z cleanup locked']);
                 expect(c.status().lastSuccessAt).toBeUndefined();
             });
 
@@ -466,8 +466,8 @@ describe('src/component/scheduled', () => {
                     schedule: '* * * * * *',
                     lock,
                     hooks: {
-                        onSkip: (at) => {
-                            skipped.push(at.toISOString());
+                        onSkip: (at, context) => {
+                            skipped.push(`${at.toISOString()} ${context.scheduledAt.toISOString()} ${context.name} ${context.reason}`);
                         },
                     },
                     run: async ({ scheduledAt }) => {
@@ -480,7 +480,7 @@ describe('src/component/scheduled', () => {
                 vi.setSystemTime(Date.now() + 61_000);
                 await vi.advanceTimersByTimeAsync(500);
                 expect(seen).toEqual([]);
-                expect(skipped).toEqual(['2026-01-15T10:00:01.000Z']);
+                expect(skipped).toEqual(['2026-01-15T10:00:01.000Z 2026-01-15T10:00:01.000Z cleanup late']);
                 expect(lock.acquired).toHaveLength(1);
                 // the next tick runs as usual
                 await vi.advanceTimersByTimeAsync(1000);
@@ -788,7 +788,11 @@ describe('src/component/scheduled', () => {
             });
 
             await c.start();
-            expect(c.status()).toEqual({ lastSuccessAt: Date.parse('2030-01-15T10:00:00.000Z'), runningSince: undefined });
+            expect(c.status()).toEqual({
+                lastSuccessAt: Date.parse('2030-01-15T10:00:00.000Z'),
+                lastRunAt: Date.parse('2030-01-15T10:00:00.000Z'),
+                runningSince: undefined,
+            });
 
             clock.advance(1000);
             expect(c.status().runningSince).toBe(Date.parse('2030-01-15T10:00:01.000Z'));
@@ -796,7 +800,11 @@ describe('src/component/scheduled', () => {
             clock.advance(250);
             gate.resolve();
             await c.settled();
-            expect(c.status()).toEqual({ lastSuccessAt: Date.parse('2030-01-15T10:00:01.250Z'), runningSince: undefined });
+            expect(c.status()).toEqual({
+                lastSuccessAt: Date.parse('2030-01-15T10:00:01.250Z'),
+                lastRunAt: Date.parse('2030-01-15T10:00:01.250Z'),
+                runningSince: undefined,
+            });
             await c.stop();
         });
 
@@ -942,6 +950,207 @@ describe('src/component/scheduled', () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+
+    describe('status and hook context', () => {
+        const T0 = Date.parse('2030-01-15T10:00:00.000Z');
+
+        it('should set lastErrorAt and lastRunAt for a failed pass and leave lastSuccessAt', async () => {
+            const clock = new FakeClock(T0);
+            let passes = 0;
+            const c = defineScheduledComponent({
+                schedule: '* * * * * *',
+                clock,
+                run: async () => {
+                    passes++;
+
+                    if (passes === 2) {
+                        throw new Error('x');
+                    }
+                },
+            });
+
+            await c.start();
+            clock.advance(1000);
+            await drain();
+            expect(c.status()).toEqual({
+                lastSuccessAt: T0,
+                lastErrorAt: T0 + 1000,
+                lastRunAt: T0 + 1000,
+                runningSince: undefined,
+            });
+            await c.stop();
+        });
+
+        it('should set lastSuccessAt and lastRunAt for a successful pass and leave lastErrorAt', async () => {
+            const clock = new FakeClock(T0);
+            let passes = 0;
+            const c = defineScheduledComponent({
+                schedule: '* * * * * *',
+                clock,
+                run: async () => {
+                    passes++;
+
+                    if (passes === 1) {
+                        throw new Error('x');
+                    }
+                },
+            });
+
+            await c.start();
+            expect(c.status()).toEqual({
+                lastErrorAt: T0, 
+                lastRunAt: T0, 
+                runningSince: undefined, 
+            });
+            clock.advance(1000);
+            await drain();
+            expect(c.status()).toEqual({
+                lastSuccessAt: T0 + 1000,
+                lastErrorAt: T0,
+                lastRunAt: T0 + 1000,
+                runningSince: undefined,
+            });
+            await c.stop();
+        });
+
+        it('should pass the pass\'s scheduledAt and the component\'s name to onError', async () => {
+            const clock = new FakeClock(T0 + 250);
+            const failure = new Error('x');
+            const seen: unknown[][] = [];
+            const c = defineScheduledComponent({
+                name: 'cleanup',
+                schedule: '* * * * * *',
+                clock,
+                hooks: {
+                    onError: (error, context) => {
+                        seen.push([error, context.scheduledAt.toISOString(), context.name]);
+                    },
+                },
+                run: async () => {
+                    throw failure;
+                },
+            });
+
+            await c.start();
+            clock.advance(750);
+            await drain();
+            await c.stop();
+            expect(seen).toEqual([
+                [failure, '2030-01-15T10:00:00.250Z', 'cleanup'], // the start pass: when start() ran it
+                [failure, '2030-01-15T10:00:01.000Z', 'cleanup'],
+            ]);
+        });
+
+        it('should pass no name to onError when the component has none', async () => {
+            const clock = new FakeClock(T0);
+            const seen: unknown[] = [];
+            const c = defineScheduledComponent({
+                schedule: '* * * * * *',
+                clock,
+                hooks: {
+                    onError: (_error, context) => {
+                        seen.push(context);
+                    },
+                },
+                run: async () => {
+                    throw new Error('x');
+                },
+            });
+
+            await c.start();
+            await c.stop();
+            expect(seen).toEqual([{ scheduledAt: new Date(T0), name: undefined }]);
+        });
+
+        it('should report a rejected acquire with the tick\'s slot and leave the status as it was', async () => {
+            const clock = new FakeClock(T0 + 500);
+            const lock = new MemoryScheduleLock({ clock });
+            const failure = new Error('down');
+
+            lock.acquireError = failure;
+
+            const seen: unknown[][] = [];
+            const c = defineScheduledComponent({
+                name: 'cleanup',
+                schedule: '* * * * * *',
+                lock,
+                clock,
+                hooks: {
+                    onError: (error, context) => {
+                        seen.push([error, context.scheduledAt.toISOString(), context.name]);
+                    },
+                },
+                run: async () => {},
+            });
+
+            await c.start();
+            clock.advance(500);
+            await drain();
+            await c.stop();
+            expect(seen).toEqual([[failure, '2030-01-15T10:00:01.000Z', 'cleanup']]);
+            expect(c.status()).toEqual({ runningSince: undefined });
+        });
+
+        it('should pass the slot, the name and the reason locked to onSkip and leave the status as it was', async () => {
+            const clock = new FakeClock(T0 + 500);
+            const lock = new MemoryScheduleLock({ clock });
+
+            // another replica holds :01
+            await lock.acquire('cleanup:2030-01-15T10:00:01.000Z', 60_000);
+
+            const skipped: unknown[][] = [];
+            const c = defineScheduledComponent({
+                name: 'cleanup',
+                schedule: '* * * * * *',
+                lock,
+                lockTtlMs: 5000,
+                clock,
+                hooks: {
+                    onSkip: (scheduledAt, context) => {
+                        skipped.push([scheduledAt.toISOString(), context]);
+                    },
+                },
+                run: async () => {},
+            });
+
+            await c.start();
+            clock.advance(500);
+            await drain();
+            expect(skipped).toEqual([
+                ['2030-01-15T10:00:01.000Z', {
+                    scheduledAt: new Date(T0 + 1000), 
+                    name: 'cleanup', 
+                    reason: 'locked', 
+                }],
+            ]);
+            await c.stop();
+            expect(c.status()).toEqual({ runningSince: undefined });
+        });
+
+        it('should still record a failed pass when onError throws', async () => {
+            const clock = new FakeClock(T0);
+            const c = defineScheduledComponent({
+                schedule: '* * * * * *',
+                clock,
+                hooks: {
+                    onError: () => {
+                        throw new Error('hook');
+                    },
+                },
+                run: async () => {
+                    throw new Error('x');
+                },
+            });
+
+            await expect(c.start()).resolves.toBeUndefined();
+            expect(c.status()).toEqual({
+                lastErrorAt: T0, 
+                lastRunAt: T0, 
+                runningSince: undefined, 
+            });
+            await c.stop();
+        });
     });
 
     describe('unref', () => {

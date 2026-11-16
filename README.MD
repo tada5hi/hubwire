@@ -44,7 +44,7 @@ hubwire gives all of that one shape:
 | Concern | Hand-rolled | hubwire |
 |---|---|---|
 | **Lifecycle** | Every worker, consumer and cron job has its own start and shutdown code | One `IComponent` contract: `start()`, `stop()`, `status()`, so you can start, stop and health-check all of them the same way |
-| **Health** | Ad-hoc flags, or none | `status()` reports `lastSuccessAt` and `runningSince` |
+| **Health** | Ad-hoc flags, or none | `status()` reports `lastSuccessAt`, `lastErrorAt`, `lastRunAt` and `runningSince` |
 | **Transport** | Handler code is written against amqplib, Redis or a function call | The handler only sees `(data, context)`. A `LocalDispatcher` or a `RemoteDispatcher` decides how it is reached, and both implement the same `IDispatcher` |
 | **Replies** | A second queue, wired and correlated by hand | `context.handle('buildFinished', …)` emits a reply, `RemoteWorker` publishes it, and the dispatch's `correlationId` carries over |
 | **Tests** | A broker in CI, or `vi.mock` on the client | `MemoryMessageBusDriver`: in-process and deterministic, with the same delivery contract as the amqp driver |

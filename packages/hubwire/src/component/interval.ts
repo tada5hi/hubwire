@@ -1,7 +1,12 @@
 import { systemClock } from '../clock';
 import type { ClockTimer } from '../clock';
 import { createPassRunner } from './pass';
-import type { IScheduledComponent, IntervalComponentOptions, IntervalResult } from './types';
+import type {
+    IScheduledComponent,
+    IntervalComponentHookContext,
+    IntervalComponentOptions,
+    IntervalResult,
+} from './types';
 
 // setTimeout's limit: a longer wait is armed in steps of at most this
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -29,7 +34,8 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
     }
 
     const clock = options.clock ?? systemClock;
-    const runner = createPassRunner<Decision>(clock, options.hooks);
+    const runner = createPassRunner<Decision, IntervalComponentHookContext>(clock, options.hooks);
+    const context: IntervalComponentHookContext = { name: options.name };
 
     let timer: ClockTimer | undefined;
     let looping = false;
@@ -57,7 +63,7 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
     };
 
     const execute = () => runner.execute(async (signal) => {
-        const outcome = await runner.measure(async () => decide(await options.handler({ signal })));
+        const outcome = await runner.measure(async () => decide(await options.handler({ signal })), context);
 
         // a failed pass (also an invalid delayMs) waits the interval
         return outcome ? outcome.value : { done: false, delayMs: intervalMs };

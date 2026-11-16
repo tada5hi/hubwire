@@ -3,7 +3,12 @@ import { systemClock } from '../clock';
 import type { ClockTimer } from '../clock';
 import { invokeHook } from '../hook';
 import { createPassRunner } from './pass';
-import type { IScheduledComponent, ScheduledComponentOptions } from './types';
+import type {
+    IScheduledComponent,
+    ScheduledComponentHookContext,
+    ScheduledComponentOptions,
+    ScheduledComponentSkipReason,
+} from './types';
 
 // the longest a timer waits before the loop looks at the clock again: keeps a far slot
 // below setTimeout's 2^31-1 ms limit and re-evaluates a slot croner answered in the past
@@ -79,9 +84,15 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
     };
     let scheduled = false;
     // generations: a start() whose first pass was overtaken by a start() or stop() must not schedule afterwards
-    const runner = createPassRunner<void>(clock, options.hooks);
+    const runner = createPassRunner<void, ScheduledComponentHookContext>(clock, options.hooks);
     // epoch ms of the last tick's slot (or of the moment scheduling began): the next slot lies after it
     let last = 0;
+
+    const context = (scheduledAt: Date): ScheduledComponentHookContext => ({ scheduledAt, name: options.name });
+
+    const skip = (scheduledAt: Date, reason: ScheduledComponentSkipReason) => {
+        invokeHook(options.hooks, 'onSkip', scheduledAt, { ...context(scheduledAt), reason });
+    };
 
     const run = async (scheduledAt: Date, locked: boolean, signal: AbortSignal) => {
         if (locked && lock) {
@@ -90,21 +101,21 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             try {
                 acquired = await lock.instance.acquire(`${lock.name}:${scheduledAt.toISOString()}`, lock.ttlMs);
             } catch (e) {
-                // fail closed: the next tick tries again
-                invokeHook(options.hooks, 'onError', e);
+                // fail closed: the next tick tries again; no pass ran, so the status stays
+                invokeHook(options.hooks, 'onError', e, context(scheduledAt));
 
                 return;
             }
 
             if (!acquired) {
-                invokeHook(options.hooks, 'onSkip', scheduledAt);
+                skip(scheduledAt, 'locked');
 
                 return;
             }
             // never released: the key is unique per tick, its TTL ends it
         }
 
-        await runner.measure(() => options.run({ scheduledAt, signal }));
+        await runner.measure(() => options.run({ scheduledAt, signal }), context(scheduledAt));
     };
 
     // the start pass is not locked: its scheduledAt differs per replica, a lock could not dedupe it
@@ -149,7 +160,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             if (lock && clock.now() - slot >= lock.ttlMs) {
                 // fired so late (a stall, a sleep) that the tick's key may have expired after
                 // another replica ran it: running it now could run it twice
-                invokeHook(options.hooks, 'onSkip', new Date(slot));
+                skip(new Date(slot), 'late');
 
                 return;
             }

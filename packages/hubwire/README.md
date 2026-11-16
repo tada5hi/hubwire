@@ -152,14 +152,15 @@ Every component implements `IComponent`:
 interface IComponent {
     start(): Promise<void>;
     stop(): Promise<void>;
-    status(): ComponentStatus; // { lastSuccessAt?: number, runningSince?: number }
+    status(): ComponentStatus; // { lastSuccessAt?, lastErrorAt?, lastRunAt?, runningSince? }: epoch ms
     settled?(): Promise<void>; // resolves once no work started by the component runs
     handle?(key, data, metadata?, options?): Promise<void>;
 }
 ```
 
 `status()` reports top-level calls only (child events do not count): `runningSince` is set while
-a call is in flight, `lastSuccessAt` when the last one completed without throwing. `start()` and
+a call is in flight, `lastSuccessAt` when the last one completed without throwing, `lastErrorAt`
+when the last one threw, and `lastRunAt` when the last one ended either way. `start()` and
 `stop()` do nothing on a plain `Component`. Override them to acquire and release background work.
 
 `settled()` is optional, so components of every kind share one array. A shutdown stops them all,
@@ -182,12 +183,12 @@ const cleaner = defineScheduledComponent({
     schedule: '*/5 * * * *', // every five minutes
     run: ({ scheduledAt }) => sessions.deleteExpired(scheduledAt),
     hooks: {
-        onError: (error) => logger.warn('session cleanup failed', error),
+        onError: (error, { scheduledAt }) => logger.warn(`session cleanup of ${scheduledAt.toISOString()} failed`, error),
     },
 });
 
 await cleaner.start(); // one pass now, then one per tick
-cleaner.status();      // { lastSuccessAt, runningSince }
+cleaner.status();      // { lastSuccessAt, lastErrorAt, lastRunAt, runningSince }
 await cleaner.stop();
 await cleaner.settled(); // the pass in flight, if any, has finished
 ```
@@ -197,7 +198,9 @@ await cleaner.settled(); // the pass in flight, if any, has finished
   aborts while the pass runs.
 - `start()` runs a first pass before scheduling. Pass `runOnStart: false` to wait for the first tick.
 - Passes never overlap: a tick while a pass is still running is skipped.
-- A failing pass goes to `hooks.onError` and never rejects. The next tick simply runs again.
+- A failing pass goes to `hooks.onError(error, { scheduledAt, name })` and never rejects. The next
+  tick simply runs again. `status()` tells failing passes apart: `lastErrorAt` and `lastRunAt` move,
+  `lastSuccessAt` stays.
 - `stop()` never waits for a pass in flight, so a pass may stop its own component. Stopped during
   the first pass, the component never schedules a tick. A pass must not *await* its component's
   `start()`, which would join the pass itself: restart with `void cleaner.start()`.
@@ -228,7 +231,7 @@ const report = defineScheduledComponent({
     lock,
     run: ({ scheduledAt }) => reports.send(scheduledAt),
     hooks: {
-        onSkip: (scheduledAt) => logger.debug('another replica runs this tick', scheduledAt),
+        onSkip: (scheduledAt, { reason }) => logger.debug(`tick ${scheduledAt.toISOString()} skipped: ${reason}`),
     },
 });
 ```
@@ -240,11 +243,12 @@ const report = defineScheduledComponent({
 - The key is never released: `lockTtlMs` (default 60 s) ends it. It must exceed the clock skew
   between replicas plus how late a replica can fire (a late timer still runs its tick, with the
   planned `scheduledAt`). A timer that fires `lockTtlMs` or more late (an event-loop stall, a
-  sleep) skips its tick and reports it to `hooks.onSkip`, since the key may already have expired.
+  sleep) skips its tick and reports it to `hooks.onSkip` (reason `'late'`), since the key may already have expired.
 - So a tick runs **at most once**: a replica that wins the key and then crashes, or whose pass
   fails, loses that tick for every replica. The next tick is independent.
-- `acquire()` rejecting skips the tick (fail closed) and goes to `hooks.onError`. A tick another
-  replica holds goes to `hooks.onSkip`.
+- `acquire()` rejecting skips the tick (fail closed) and goes to `hooks.onError` with the tick's
+  `scheduledAt`; no pass ran, so `status()` does not change. A tick another replica holds goes to
+  `hooks.onSkip` (reason `'locked'`).
 - `status().lastSuccessAt` counts only the passes this replica ran, so it stays empty on replicas
   that never win. Point a health check across replicas at `onSkip` as well.
 - With a lock, `runOnStart` defaults to `false`: the first pass is never locked (its `scheduledAt`
@@ -276,7 +280,7 @@ const purge = defineIntervalComponent({
     intervalMs: 60_000,
     handler: () => store.purgeExpired(),
     hooks: {
-        onError: (error) => logger.warn('purge failed', error),
+        onError: (error, { name }) => logger.warn(`${name} failed`, error),
     },
 });
 
@@ -313,8 +317,8 @@ const indexer = defineIntervalComponent({
   A `start()` that arrives while a pass is in flight means "keep running": if that pass returns
   `{ done: true }`, the loop begins again at once as a fresh `start()` would, so work queued
   during the final pass is not dropped. `stop()` clears that request.
-- A failing pass (a throw, a rejection, an invalid `delayMs`) goes to `hooks.onError`, leaves
-  `lastSuccessAt` as it was, and the loop waits `intervalMs`.
+- A failing pass (a throw, a rejection, an invalid `delayMs`) goes to `hooks.onError(error, { name })`,
+  sets `lastErrorAt` and `lastRunAt`, leaves `lastSuccessAt` as it was, and the loop waits `intervalMs`.
 - `stop()` aborts the signal of the pass in flight and arms nothing after it, whatever the pass
   returns; it does not wait for the pass, `settled()` does. A pass that throws because of the abort
   is reported to `hooks.onError` like any other failure.
@@ -638,9 +642,9 @@ to your logger, metrics or tracing:
 | | `onExpired(message, routing)` | Its `metadata.expiresAt` had passed. It is acked without a handler |
 | | `onError(error, message, routing)` | A handler threw. The error is rethrown to the driver afterwards |
 | `RemoteWorker` | `onUnrouted(event)` | A forwarded event was dropped because no `publish` routing is set |
-| `defineScheduledComponent` | `onError(error)` | A pass failed, or the lock's `acquire()` rejected (the tick is skipped) |
-| | `onSkip(scheduledAt)` | Another replica holds this tick's lock, or the tick fired `lockTtlMs` or more late. The pass is skipped |
-| `defineIntervalComponent` | `onError(error)` | A pass threw, rejected or returned an invalid `delayMs`. The loop waits `intervalMs` |
+| `defineScheduledComponent` | `onError(error, { scheduledAt, name })` | A pass failed, or the lock's `acquire()` rejected (the tick is skipped) |
+| | `onSkip(scheduledAt, { scheduledAt, name, reason })` | A tick was skipped: `'locked'` (another replica holds its lock) or `'late'` (it fired `lockTtlMs` or more late) |
+| `defineIntervalComponent` | `onError(error, { name })` | A pass threw, rejected or returned an invalid `delayMs`. The loop waits `intervalMs` |
 
 ```typescript
 const messageBus = new MessageBus({
@@ -681,6 +685,7 @@ turn an ack into a retry or reject a `publish()`. Your own extensions can follow
 | `assertMessageRouting` | function | Throws a `TypeError` for a routing no driver accepts (a `work` namespace with `/`); drivers call it in `publish()` / `consume()` |
 | `invokeHook` | function | Calls a hook and ignores a throw or rejection |
 | `MessageBusHooks`, `RemoteWorkerHooks`, `ScheduledComponentHooks`, `IntervalComponentHooks` | type | Hook types |
+| `ScheduledComponentHookContext`, `ScheduledComponentSkipContext`, `ScheduledComponentSkipReason`, `IntervalComponentHookContext` | type | What the scheduled and interval hooks receive besides the error or slot |
 
 ## Notes
 
