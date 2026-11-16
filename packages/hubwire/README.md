@@ -662,8 +662,8 @@ Behaviour that changed:
 - **Worker lifecycle races are handled.** `RemoteWorker` joins a concurrent `start()`, and a `stop()`
   during `start()` leaves no consumer behind, so application-side ordering of starts and teardown
   is no longer needed for that.
-- **Scheduled components** validate the cron expression when they are defined and destroy their
-  node-cron task on `stop()`.
+- **Scheduled components** validate the cron expression when they are defined and clear their
+  timer on `stop()`.
 
 ## Hooks
 
