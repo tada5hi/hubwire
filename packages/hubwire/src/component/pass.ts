@@ -99,12 +99,12 @@ export function createPassRunner<T>(clock: IClock, hooks: Pick<ScheduledComponen
          * when it resolves; a failure goes to hooks.onError and resolves `undefined`.
          */
         async measure<R>(fn: () => Promise<R> | R): Promise<{ value: R } | undefined> {
-            runningSince = clock.now().getTime();
+            runningSince = clock.now();
 
             try {
                 const value = await fn();
 
-                lastSuccessAt = clock.now().getTime();
+                lastSuccessAt = clock.now();
 
                 return { value };
             } catch (e) {

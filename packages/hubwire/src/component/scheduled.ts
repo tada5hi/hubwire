@@ -44,7 +44,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
         throw new Error(`Invalid cron expression: ${options.schedule}`);
     }
 
-    if (evaluator.nextRun(clock.now()) === null) {
+    if (evaluator.nextRun(new Date(clock.now())) === null) {
         // e.g. 31 February: the component would start and silently never run
         throw new Error(`Cron expression has no future run: ${options.schedule}`);
     }
@@ -101,7 +101,9 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
     const execute = (scheduledAt: Date, locked: boolean) => runner.execute((signal) => run(scheduledAt, locked, signal));
 
     function arm() {
-        const from = Math.max(clock.now().getTime(), last);
+        const from = Math.max(clock.now(), last);
+        // a Date drops the fraction of `from` (it floors): croner answers the first slot after
+        // that whole ms, which the comparison below holds against the exact `from`
         const next = evaluator.nextRun(new Date(from));
 
         if (!next) {
@@ -123,7 +125,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
 
     function wait(slot: number) {
         timer = clock.setTimeout(() => {
-            if (clock.now().getTime() < slot) {
+            if (clock.now() < slot) {
                 // a capped wait woke before the slot
                 wait(slot);
 
@@ -134,7 +136,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             // re-arm before the pass: a pass that stops its own component clears this timer
             arm();
 
-            if (lock && clock.now().getTime() - slot >= lock.ttlMs) {
+            if (lock && clock.now() - slot >= lock.ttlMs) {
                 // fired so late (a stall, a sleep) that the tick's key may have expired after
                 // another replica ran it: running it now could run it twice
                 invokeHook(options.hooks, 'onSkip', new Date(slot));
@@ -143,7 +145,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             }
 
             void execute(new Date(slot), true);
-        }, Math.min(slot - clock.now().getTime(), RECHECK_MS));
+        }, Math.min(slot - clock.now(), RECHECK_MS));
     }
 
     return {
@@ -155,7 +157,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             const current = runner.next();
 
             if (options.runOnStart ?? !lock) {
-                await execute(clock.now(), false);
+                await execute(new Date(clock.now()), false);
             }
 
             if (!runner.isCurrent(current)) {
@@ -163,7 +165,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             }
 
             scheduled = true;
-            last = clock.now().getTime();
+            last = clock.now();
             arm();
         },
         async stop() {

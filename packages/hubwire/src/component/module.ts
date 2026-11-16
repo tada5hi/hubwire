@@ -129,11 +129,11 @@ export class Component<
         options: AnyHandleOptions = {},
     ): Promise<void> {
         this.running++;
-        this.runningSince ??= this.clock.now().getTime();
+        this.runningSince ??= this.clock.now();
 
         try {
             await this.dispatch(key, data, metadata, options);
-            this.lastSuccessAt = this.clock.now().getTime();
+            this.lastSuccessAt = this.clock.now();
         } finally {
             this.running--;
 

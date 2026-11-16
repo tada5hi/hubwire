@@ -332,15 +332,16 @@ Components read the time and arm their timers through an `IClock`:
 
 ```typescript
 interface IClock {
-    now(): Date;
+    now(): number; // epoch milliseconds, fractions allowed
     setTimeout(fn: () => void, ms: number): { clear(): void };
 }
 ```
 
-`systemClock` (`new Date()` and the global `setTimeout`, as they are) is the default. Pass `clock`
+`systemClock` (`Date.now()` and the global `setTimeout`, as they are) is the default. Pass `clock`
 to `defineScheduledComponent`, `defineIntervalComponent` or `new Component({ clock })` to drive a
-component from your own clock, e.g. `FakeClock` from `@hubwire/test` in a test. `status()` still
-reports epoch milliseconds, taken from `clock.now()`. The message bus keeps reading `Date.now()`.
+component from your own clock, e.g. `FakeClock` from `@hubwire/test` in a test, or a monotonic one
+(`now: () => performance.timeOrigin + performance.now()`). `status()` reports `clock.now()` as is;
+a `scheduledAt` taken from it drops the fraction. The message bus keeps reading `Date.now()`.
 
 ## Message bus
 

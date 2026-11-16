@@ -7,7 +7,7 @@ type FakeTimer = {
 };
 
 /**
- * An IClock that moves only when advanced. `advance(ms)` fires every timer due within the
+ * An IClock that moves only when advanced; `now()` is epoch ms (fractions kept). `advance(ms)` fires every timer due within the
  * span in order of its time (then of arming), with `now()` at the timer's time while it
  * fires, including the timers a fired one arms within the span; it awaits nothing, so
  * asynchronous work a timer starts runs after it returned (see `drain()`).
@@ -31,8 +31,8 @@ export class FakeClock implements IClock {
         return this.timers.length;
     }
 
-    now(): Date {
-        return new Date(this.time);
+    now(): number {
+        return this.time;
     }
 
     setTimeout(fn: () => void, ms: number): { clear(): void } {

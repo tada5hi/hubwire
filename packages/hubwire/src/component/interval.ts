@@ -91,14 +91,14 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
         }
 
         looping = true;
-        wait(current, clock.now().getTime() + decision.delayMs);
+        wait(current, clock.now() + decision.delayMs);
     };
 
     function wait(current: number, until: number) {
         timer = clock.setTimeout(() => {
             timer = undefined;
 
-            const now = clock.now().getTime();
+            const now = clock.now();
 
             if (now < until) {
                 // a capped wait woke before the end of the delay
@@ -108,7 +108,7 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
             }
 
             void execute().then((decision) => follow(current, decision));
-        }, Math.min(until - clock.now().getTime(), MAX_TIMER_MS));
+        }, Math.min(until - clock.now(), MAX_TIMER_MS));
     }
 
     async function begin() {

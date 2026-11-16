@@ -21,7 +21,7 @@ function record(clock: FakeClock, results: IntervalResult[] = []) {
     return {
         passes,
         handler: () => {
-            passes.push(clock.now().getTime() - START);
+            passes.push(clock.now() - START);
 
             return results[index++];
         },
@@ -104,7 +104,7 @@ describe('src/component/interval', () => {
             intervalMs: 10_000,
             clock,
             handler: async () => {
-                passes.push(clock.now().getTime() - START);
+                passes.push(clock.now() - START);
                 await gate.promise;
             },
         });
@@ -525,7 +525,7 @@ describe('src/component/interval', () => {
                 runOnStart,
                 clock,
                 handler: async () => {
-                    passes.push(clock.now().getTime() - START);
+                    passes.push(clock.now() - START);
 
                     const gate = Promise.withResolvers<void>();
 
@@ -667,7 +667,7 @@ describe('src/component/interval', () => {
                 intervalMs: 1000,
                 clock,
                 handler: async () => {
-                    passes.push(clock.now().getTime() - START);
+                    passes.push(clock.now() - START);
 
                     if (passes.length === 1) {
                         await gate.promise;
@@ -706,7 +706,7 @@ describe('src/component/interval', () => {
                 runOnStart: true,
                 clock,
                 handler: async () => {
-                    passes.push(clock.now().getTime() - START);
+                    passes.push(clock.now() - START);
 
                     if (passes.length === 1) {
                         await gate.promise;

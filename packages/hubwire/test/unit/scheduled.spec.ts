@@ -816,6 +816,58 @@ describe('src/component/scheduled', () => {
             expect(seen).toEqual(['2030-01-16T00:00:00.000Z']);
         });
 
+        it('should run each slot on time with whole-ms dates when now() has fractions', async () => {
+            // a clock like performance.timeOrigin + performance.now(): 0.25 ms before a slot
+            const clock = new FakeClock(Date.parse('2030-01-15T10:00:00.000Z') - 0.25);
+            const seen: string[] = [];
+            const c = defineScheduledComponent({
+                schedule: '* * * * * *',
+                clock,
+                run: async ({ scheduledAt }) => {
+                    seen.push(scheduledAt.toISOString());
+                },
+            });
+
+            await c.start();
+            expect(seen).toEqual(['2030-01-15T09:59:59.999Z']);
+            expect(c.status().lastSuccessAt).toBe(Date.parse('2030-01-15T10:00:00.000Z') - 0.25);
+
+            // a wait below 1 ms is armed as 1 ms (as setTimeout does): the slot fires 0.75 ms late
+            clock.advance(1);
+            await drain();
+            expect(seen).toHaveLength(2);
+            clock.advance(1000);
+            await drain();
+            await c.stop();
+            expect(seen).toEqual([
+                '2030-01-15T09:59:59.999Z',
+                '2030-01-15T10:00:00.000Z',
+                '2030-01-15T10:00:01.000Z',
+            ]);
+        });
+
+        it('should not run a slot again when now() is a fraction past it', async () => {
+            const clock = new FakeClock(Date.parse('2030-01-15T10:00:00.000Z') + 0.5);
+            const seen: string[] = [];
+            const c = defineScheduledComponent({
+                schedule: '* * * * * *',
+                runOnStart: false,
+                clock,
+                run: async ({ scheduledAt }) => {
+                    seen.push(scheduledAt.toISOString());
+                },
+            });
+
+            await c.start();
+            clock.advance(999);
+            await drain();
+            expect(seen).toEqual([]);
+            clock.advance(0.5);
+            await drain();
+            await c.stop();
+            expect(seen).toEqual(['2030-01-15T10:00:01.000Z']);
+        });
+
         it('should hand the pass a signal that stop() aborts', async () => {
             const clock = new FakeClock();
             const gate = Promise.withResolvers<void>();
@@ -869,7 +921,7 @@ describe('src/component/scheduled', () => {
             const baseline = vi.getTimerCount();
             let fired = 0;
 
-            expect(systemClock.now().toISOString()).toBe('2026-01-15T10:00:00.000Z');
+            expect(systemClock.now()).toBe(Date.parse('2026-01-15T10:00:00.000Z'));
 
             const timer = systemClock.setTimeout(() => {
                 fired++;

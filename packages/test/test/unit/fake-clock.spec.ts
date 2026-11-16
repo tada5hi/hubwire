@@ -5,13 +5,21 @@ describe('src/fake-clock', () => {
     it('should start at the given time and move only when advanced', () => {
         const clock = new FakeClock(new Date('2026-01-15T10:00:00.000Z'));
 
-        expect(clock.now().toISOString()).toBe('2026-01-15T10:00:00.000Z');
+        expect(clock.now()).toBe(Date.parse('2026-01-15T10:00:00.000Z'));
         clock.advance(1500);
-        expect(clock.now().toISOString()).toBe('2026-01-15T10:00:01.500Z');
+        expect(clock.now()).toBe(Date.parse('2026-01-15T10:00:01.500Z'));
     });
 
     it('should start at epoch 0 by default', () => {
-        expect(new FakeClock().now().getTime()).toBe(0);
+        expect(new FakeClock().now()).toBe(0);
+    });
+
+    it('should accept epoch milliseconds with fractions and keep them', () => {
+        const clock = new FakeClock(1000.25);
+
+        expect(clock.now()).toBe(1000.25);
+        clock.advance(0.5);
+        expect(clock.now()).toBe(1000.75);
     });
 
     it('should fire due timers in order of their time, then of arming', () => {
@@ -41,12 +49,12 @@ describe('src/fake-clock', () => {
         const seen: number[] = [];
 
         clock.setTimeout(() => {
-            seen.push(clock.now().getTime());
+            seen.push(clock.now());
         }, 100);
         clock.advance(250);
 
         expect(seen).toEqual([100]);
-        expect(clock.now().getTime()).toBe(250);
+        expect(clock.now()).toBe(250);
     });
 
     it('should fire a timer armed by a fired timer within the advanced span', () => {
@@ -54,9 +62,9 @@ describe('src/fake-clock', () => {
         const fired: number[] = [];
 
         clock.setTimeout(() => {
-            fired.push(clock.now().getTime());
+            fired.push(clock.now());
             clock.setTimeout(() => {
-                fired.push(clock.now().getTime());
+                fired.push(clock.now());
             }, 100);
         }, 100);
         clock.advance(200);
@@ -71,7 +79,7 @@ describe('src/fake-clock', () => {
 
         clock.setTimeout(() => {
             clock.setTimeout(() => {
-                fired.push(clock.now().getTime());
+                fired.push(clock.now());
             }, 100);
         }, 100);
         clock.advance(150);

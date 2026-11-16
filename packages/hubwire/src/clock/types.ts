@@ -3,7 +3,10 @@
  * a test passes a controllable one (`FakeClock` of `@hubwire/test`).
  */
 export interface IClock {
-    now(): Date;
+    /**
+     * Epoch milliseconds; fractions are allowed (e.g. `performance.timeOrigin + performance.now()`).
+     */
+    now(): number;
     /**
      * Calls `fn` once after `ms` milliseconds, unless cleared before.
      */
