@@ -1,3 +1,4 @@
+import type { IClock } from '../clock';
 import type { ObjectLiteral } from '../types';
 
 export type ComponentMetadata = {
@@ -7,6 +8,13 @@ export type ComponentMetadata = {
 
 export type ComponentEventMapValue = [ObjectLiteral, ComponentMetadata];
 export type ComponentEventMap = Record<string, ComponentEventMapValue>;
+
+export type ComponentOptions = {
+    /**
+     * Where status() times come from. Default: systemClock
+     */
+    clock?: IClock,
+};
 
 export type ComponentStatus = {
     /**
@@ -156,6 +164,10 @@ type ScheduledComponentBaseOptions = {
      */
     runOnStart?: boolean,
     hooks?: ScheduledComponentHooks,
+    /**
+     * Time and timers of the schedule and of status(). Default: systemClock
+     */
+    clock?: IClock,
 };
 
 export type ScheduledComponentOptions = ScheduledComponentBaseOptions & (
