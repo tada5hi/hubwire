@@ -25,7 +25,7 @@ The per-package `test` scripts pass `--run`, so they never enter watch mode — 
 
 ### Unit Tests
 
-`test/unit/` holds the only test layer, one spec per module — hubwire: `component`, `scheduled`, `interval`,
+`test/unit/` holds the only test layer, one spec per module — hubwire: `component`, `scheduled`, `interval`, `group`,
 `hook`, `message-bus`, `memory-driver`, `local-dispatcher`, `remote-dispatcher`, `remote-worker`;
 @hubwire/amqp: `driver`; @hubwire/test: `memory`, `memory-schedule-lock`, `fake-clock`. Specs import the package under test from its
 **source** barrel (`'../../src'`), not from `dist/`; other packages (`hubwire`, `@hubwire/test`)

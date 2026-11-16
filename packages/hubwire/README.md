@@ -58,6 +58,7 @@ health-check all of them in one loop.
   - [Handlers and replies](#handlers-and-replies)
   - [Initialization](#initialization)
   - [Lifecycle and status](#lifecycle-and-status)
+  - [Component groups](#component-groups)
 - [Scheduled components](#scheduled-components)
 - [Message bus](#message-bus)
   - [Routing](#routing)
@@ -171,6 +172,39 @@ const components: IComponent[] = [cleaner, worker];
 await Promise.all(components.map((component) => component.stop()));
 await Promise.all(components.map((component) => component.settled?.()));
 ```
+
+### Component groups
+
+`defineComponentGroup` holds named components and runs that sweep for you. A group is an
+`IComponent` itself, so a host needs one object, and groups nest:
+
+```typescript
+import { defineComponentGroup } from 'hubwire';
+
+const components = defineComponentGroup({
+    hooks: { onStopFailed: (name, error) => logger.warn(`${name} did not stop cleanly`, error) },
+});
+components.add('cleaner', cleaner);
+components.add('worker', worker);
+
+await components.start(); // in add order, one at a time
+await components.stop();  // stop() on all, then settled?.() on all; never rejects
+components.status();      // { components: [{ name: 'cleaner', lastSuccessAt, … }, { name: 'worker', … }] }
+```
+
+- `start()` starts the components in add order and awaits each. If one throws or rejects, the
+  group stops and settles the ones already started, then rejects with that error; it is not
+  started, and `start()` can be retried. A `start()` while started does nothing, one in flight is
+  joined.
+- `stop()` calls `stop()` on every component in reverse add order before it awaits any, then
+  awaits them, then calls `settled?.()` on all and awaits those. A `stop()` or `settled()` that
+  throws or rejects never keeps the others from stopping and settling: it goes to
+  `onStopFailed(name, error)`. A second `stop()` does nothing until the next `start()`; a `stop()`
+  during a `start()` waits for it, then stops.
+- `settled()` resolves once every component's `settled?.()` resolved or failed; it never rejects.
+- `add()` throws on a duplicate name, and while the group is starting, started or stopping.
+- `status()` lists each component's own status under its name, in add order. The group sets no
+  `lastSuccessAt` / `runningSince` of its own: how to aggregate them is the host's decision.
 
 ## Scheduled components
 
@@ -647,6 +681,7 @@ to your logger, metrics or tracing:
 | `defineScheduledComponent` | `onError(error, { scheduledAt, name })` | A pass failed, or the lock's `acquire()` rejected (the tick is skipped) |
 | | `onSkip(scheduledAt, { scheduledAt, name, reason })` | A tick was skipped: `'locked'` (another replica holds its lock), `'late'` (it fired `lockTtlMs` or more late) or `'running'` (a pass was still running) |
 | `defineIntervalComponent` | `onError(error, { name })` | A pass threw, rejected or returned an invalid `delayMs`. The loop waits `intervalMs` |
+| `defineComponentGroup` | `onStopFailed(name, error)` | A component's `stop()` or `settled()` threw or rejected. The others are stopped and settled anyway |
 
 ```typescript
 const messageBus = new MessageBus({
@@ -669,6 +704,8 @@ turn an ack into a retry or reject a `publish()`. Your own extensions can follow
 | `Component` | class | `mount()`, `unmount()`, `handle()`, `initialize()`, `start()`, `stop()`, `status()` |
 | `defineScheduledComponent` | function | A cron job as an `IScheduledComponent` (an `IComponent` with `settled()`) |
 | `defineIntervalComponent` | function | A fixed-delay job as an `IScheduledComponent` |
+| `defineComponentGroup` | function | Named components started in order and stopped and settled as one, as an `IComponentGroup` |
+| `IComponentGroup`, `ComponentGroupOptions`, `ComponentGroupStatus`, `ComponentGroupHooks` | type | A group (an `IComponent` with `add()`), its options, status and hook |
 | `systemClock` | const | The default `IClock` |
 | `IClock`, `ClockTimer`, `ComponentOptions` | type | The clock contract, its timer handle, and `Component`'s options (`clock`) |
 | `IComponent`, `ComponentStatus`, `ComponentEventMap`, `ComponentMetadata`, `ComponentHandler`, `ComponentHandlerFn`, `ComponentHandlerContext`, `ComponentHandleOptions` | type | The component contract and handler types |
