@@ -1,6 +1,6 @@
 {
     "name": "@hubwire/amqp",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "type": "module",
     "description": "AMQP (RabbitMQ) driver for the hubwire message bus, built on amqp-extension.",
     "author": {
@@ -50,10 +50,10 @@
         "amqp-extension": "^5.1.2"
     },
     "devDependencies": {
-        "@hubwire/test": "^0.1.2",
-        "hubwire": "^0.2.2"
+        "@hubwire/test": "^0.1.3",
+        "hubwire": "^0.2.3"
     },
     "peerDependencies": {
-        "hubwire": "^0.2.2"
+        "hubwire": "^0.2.3"
     }
 }
