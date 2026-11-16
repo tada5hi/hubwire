@@ -25,36 +25,60 @@ export function defineComponentGroup(options: ComponentGroupOptions = {}): IComp
         invokeHook(options.hooks, 'onStopFailed', name, error);
     };
 
+    const stop = ({ name, component }: Entry) => call(() => component.stop()).catch(report(name));
+
     /**
      * stop() on every entry (reverse add order) before awaiting any, then settled?.() on all.
+     * An entry in `stopped` was stopped already (during its start()): its stop() is only awaited.
      * Never rejects.
      */
-    const sweep = async (started: Entry[]) => {
+    const sweep = async (started: Entry[], stopped: Map<Entry, Promise<void>>) => {
         const reversed = [...started].reverse();
 
-        await Promise.all(reversed.map(({ name, component }) => call(() => component.stop()).catch(report(name))));
+        await Promise.all(reversed.map((entry) => stopped.get(entry) ?? stop(entry)));
         await Promise.all(reversed.map(({ name, component }) => call(() => component.settled?.()).catch(report(name))));
     };
 
-    const lifecycle = createLifecycle(async () => {
+    const lifecycle = createLifecycle(async (signal) => {
         active = true;
 
         const started: Entry[] = [];
+        const stopped = new Map<Entry, Promise<void>>();
+        let starting: Entry | undefined;
+        // a stop() during start(): the component being started is stopped at once, since its
+        // start() may only resolve once it is (a scheduled component's start pass waiting for its abort)
+        const onAbort = () => {
+            if (starting) {
+                stopped.set(starting, stop(starting));
+            }
+        };
+
+        signal.addEventListener('abort', onAbort);
 
         try {
             for (const entry of entries) {
+                if (signal.aborted) {
+                    // stopped meanwhile: the rest is never started
+                    break;
+                }
+
+                starting = entry;
                 await call(() => entry.component.start());
+                starting = undefined;
                 started.push(entry);
             }
         } catch (error) {
-            await sweep(started);
+            await sweep(started, stopped);
             active = false;
 
             throw error;
+        } finally {
+            starting = undefined;
+            signal.removeEventListener('abort', onAbort);
         }
 
         return async () => {
-            await sweep(started);
+            await sweep(started, stopped);
             active = false;
         };
     });
@@ -91,8 +115,9 @@ export function defineComponentGroup(options: ComponentGroupOptions = {}): IComp
         status(): ComponentGroupStatus {
             return {
                 components: entries.map(({ name, component }) => ({
-                    name,
                     ...component.status(),
+                    // last: the name the component was added under wins over one in its status
+                    name,
                 })),
             };
         },

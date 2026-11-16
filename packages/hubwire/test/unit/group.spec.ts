@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { drain } from '@hubwire/test';
-import { defineComponentGroup } from '../../src';
+import { FakeClock, drain } from '@hubwire/test';
+import { defineComponentGroup, defineScheduledComponent } from '../../src';
 import type { ComponentGroupHooks, ComponentStatus, IComponent } from '../../src';
 
 type Failure = 'throw' | 'reject';
@@ -366,12 +366,12 @@ describe('src/group/module', () => {
         expect(components[0]!.starts).toBe(1);
     });
 
-    it('should wait for a start() in flight before stop() stops', async () => {
+    it('should stop the component being started at once on stop(), and start none after it', async () => {
         const {
-            log, 
-            group, 
-            components, 
-        } = setup(['a', 'b']);
+            log,
+            group,
+            components,
+        } = setup(['a', 'b', 'c']);
         const gate = Promise.withResolvers<void>();
 
         components[1]!.startGate = gate.promise;
@@ -383,21 +383,88 @@ describe('src/group/module', () => {
         const stopped = group.stop();
 
         await drain();
-        expect(log).toEqual(['start:a', 'start-done:a', 'start:b']);
+        // b learns about the stop while its start() is still in flight
+        expect(log).toEqual(['start:a', 'start-done:a', 'start:b', 'stop:b', 'stop-done:b']);
 
         gate.resolve();
         await Promise.all([started, stopped]);
-        expect(log.slice(3)).toEqual([
+        expect(log.slice(5)).toEqual([
             'start-done:b',
-            'stop:b',
             'stop:a',
-            'stop-done:b',
             'stop-done:a',
             'settled:b',
             'settled:a',
             'settled-done:b',
             'settled-done:a',
         ]);
+        expect(components[1]!.stops).toBe(1);
+        expect(components[2]!.starts).toBe(0);
+    });
+
+    it('should start nothing when stopped right after start()', async () => {
+        const { log, group } = setup(['a']);
+        const started = group.start();
+        const stopped = group.stop();
+
+        await Promise.all([started, stopped]);
+        expect(log).toEqual([]);
+    });
+
+    it('should report a failing stop() of the component being started', async () => {
+        const { failures, hooks } = recordingHooks();
+        const { group, components } = setup(['a'], hooks);
+        const gate = Promise.withResolvers<void>();
+
+        components[0]!.startGate = gate.promise;
+        components[0]!.stopFailure = 'throw';
+
+        const started = group.start();
+
+        await drain();
+
+        const stopped = group.stop();
+
+        gate.resolve();
+        await Promise.all([started, stopped]);
+        expect(failures).toEqual([['a', 'stop a']]);
+        expect(components[0]!.settles).toBe(1);
+    });
+
+    it('should not hang when stopped during a scheduled component\'s start pass that waits for its abort', async () => {
+        const entered = Promise.withResolvers<void>();
+        let passes = 0;
+        const job = defineScheduledComponent({
+            schedule: '0 0 1 1 *',
+            clock: new FakeClock(),
+            run: ({ signal }) => {
+                passes++;
+                entered.resolve();
+
+                return new Promise<void>((resolve) => {
+                    signal.addEventListener('abort', () => resolve());
+                });
+            },
+        });
+        const group = defineComponentGroup();
+
+        group.add('job', job);
+
+        const started = group.start();
+
+        await entered.promise;
+        await expect(Promise.all([started, group.stop()])).resolves.toBeDefined();
+        expect(passes).toBe(1);
+        expect(job.status().runningSince).toBeUndefined();
+    });
+
+    it('should keep the registered name when a component\'s status carries a name of its own', () => {
+        const group = defineComponentGroup();
+        const component = new FakeComponent('internal', []);
+
+        component.statusValue = { name: 'internal', lastRunAt: 1 } as ComponentStatus;
+        group.add('public', component);
+
+        expect(group.status()).toEqual({ components: [{ name: 'public', lastRunAt: 1 }] });
     });
 
     for (const failure of ['throw', 'reject'] as const) {

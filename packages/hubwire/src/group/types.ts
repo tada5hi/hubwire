@@ -40,7 +40,8 @@ export interface IComponentGroup extends IComponent {
     start(): Promise<void>;
     /**
      * Never rejects; a component that fails to stop or settle is reported to `onStopFailed`.
-     * Does nothing when not started; waits for a start() in flight.
+     * Does nothing when not started. During a start() in flight it stops the component being
+     * started at once (its start() may wait for that), starts none after it, then waits for the start().
      */
     stop(): Promise<void>;
     status(): ComponentGroupStatus;

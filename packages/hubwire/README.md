@@ -200,7 +200,9 @@ components.status();      // { components: [{ name: 'cleaner', lastSuccessAt, â€
   awaits them, then calls `settled?.()` on all and awaits those. A `stop()` or `settled()` that
   throws or rejects never keeps the others from stopping and settling: it goes to
   `onStopFailed(name, error)`. A second `stop()` does nothing until the next `start()`; a `stop()`
-  during a `start()` waits for it, then stops.
+  during a `start()` stops the component being started at once (its `start()` may only resolve
+  once it is stopped, like a scheduled component's start pass), starts none after it, then waits
+  for the `start()` and stops the rest.
 - `settled()` resolves once every component's `settled?.()` resolved or failed; it never rejects.
 - `add()` throws on a duplicate name, and while the group is starting, started or stopping.
 - `status()` lists each component's own status under its name, in add order. The group sets no
