@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3](https://github.com/tada5hi/hubwire/compare/hubwire-v0.2.2...hubwire-v0.2.3) (2026-11-16)
+
+
+### Features
+
+* add a clock option and defineIntervalComponent ([#39](https://github.com/tada5hi/hubwire/issues/39)) ([f64c39a](https://github.com/tada5hi/hubwire/commit/f64c39a9f3652c9ad0bb5c6172655bf12e7647e1))
+* component group, unref, pass status and hook context, epoch-ms clock ([#41](https://github.com/tada5hi/hubwire/issues/41)) ([a88aa46](https://github.com/tada5hi/hubwire/commit/a88aa468a53593d8a4b31639cbfbc9136a99cdee))
+
 ## [0.2.2](https://github.com/tada5hi/hubwire/compare/hubwire-v0.2.1...hubwire-v0.2.2) (2026-10-17)
 
 
