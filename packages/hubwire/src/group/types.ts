@@ -1,4 +1,4 @@
-import type { ComponentStatus, IComponent } from '../component';
+import type { ComponentStatus, IComponent, NamedComponentStatus } from '../component';
 
 /**
  * Observers; a hook that throws is ignored (see invokeHook).
@@ -17,10 +17,11 @@ export type ComponentGroupOptions = {
 
 /**
  * The group's own lastSuccessAt / runningSince are never set: hubwire aggregates nothing,
- * each component reports its own status under its name, in add order.
+ * each component reports its own status under its name, in add order. ComponentStatus
+ * with `components` required: through an IComponent the same list is `status().components?`.
  */
 export type ComponentGroupStatus = ComponentStatus & {
-    components: Array<{ name: string } & ComponentStatus>,
+    components: NamedComponentStatus[],
 };
 
 /**

@@ -603,4 +603,23 @@ describe('src/group/module', () => {
 
         expect(components.every((component) => component.handle === undefined)).toBe(true);
     });
+
+    it('should type the components of a group reached through an IComponent, at any depth', () => {
+        const inner = defineComponentGroup();
+        const x = new FakeComponent('x', []);
+
+        x.statusValue = { lastSuccessAt: 1 };
+        inner.add('x', x);
+
+        const outer = defineComponentGroup();
+
+        outer.add('inner', inner);
+
+        const component: IComponent = outer;
+        const status = component.status();
+
+        expect(status.components?.[0]?.name).toBe('inner');
+        expect(status.components?.[0]?.components?.[0]).toEqual({ name: 'x', lastSuccessAt: 1 });
+        expect(x.status().components).toBeUndefined();
+    });
 });

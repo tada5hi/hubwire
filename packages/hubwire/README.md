@@ -207,6 +207,8 @@ components.status();      // { components: [{ name: 'cleaner', lastSuccessAt, â€
 - `add()` throws on a duplicate name, and while the group is starting, started or stopping.
 - `status()` lists each component's own status under its name, in add order. The group sets no
   `lastSuccessAt` / `runningSince` of its own: how to aggregate them is the host's decision.
+  `components` is an optional field of `ComponentStatus` that only a group sets, so the list is
+  typed through any `IComponent` (`component.status().components ?? []`), nested groups included.
 
 ## Scheduled components
 
@@ -710,7 +712,7 @@ turn an ack into a retry or reject a `publish()`. Your own extensions can follow
 | `IComponentGroup`, `ComponentGroupOptions`, `ComponentGroupStatus`, `ComponentGroupHooks` | type | A group (an `IComponent` with `add()`), its options, status and hook |
 | `systemClock` | const | The default `IClock` |
 | `IClock`, `ClockTimer`, `ComponentOptions` | type | The clock contract, its timer handle, and `Component`'s options (`clock`) |
-| `IComponent`, `ComponentStatus`, `ComponentEventMap`, `ComponentMetadata`, `ComponentHandler`, `ComponentHandlerFn`, `ComponentHandlerContext`, `ComponentHandleOptions` | type | The component contract and handler types |
+| `IComponent`, `ComponentStatus`, `NamedComponentStatus`, `ComponentEventMap`, `ComponentMetadata`, `ComponentHandler`, `ComponentHandlerFn`, `ComponentHandlerContext`, `ComponentHandleOptions` | type | The component contract and handler types |
 | `ICallable`, `ForwardedEvent` | type | A component with a `handle()`, and one forwarded event |
 | `IScheduledComponent`, `ScheduledComponentOptions`, `ScheduledComponentRunContext` | type | A scheduled component, its options, and what `run` receives (`scheduledAt`, `signal`) |
 | `IScheduleLock` | type | Elects one replica per tick: `acquire(key, ttlMs)` |

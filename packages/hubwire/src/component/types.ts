@@ -33,6 +33,18 @@ export type ComponentStatus = {
      * Epoch ms the pass / call in flight started at.
      */
     runningSince?: number,
+    /**
+     * Only a component group sets it: the status of each of its components under the
+     * name it was added with, in add order. A nested group's entry carries its own.
+     */
+    components?: NamedComponentStatus[],
+};
+
+/**
+ * A component's status inside a group's `components`.
+ */
+export type NamedComponentStatus = ComponentStatus & {
+    name: string,
 };
 
 export type ComponentHandlerContext<
