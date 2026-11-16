@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FakeClock, drain } from '@hubwire/test';
-import { defineComponentGroup, defineScheduledComponent } from '../../src';
+import { defineComponentGroup, defineIntervalComponent, defineScheduledComponent } from '../../src';
 import type { ComponentGroupHooks, ComponentStatus, IComponent } from '../../src';
 
 type Failure = 'throw' | 'reject';
@@ -591,5 +591,16 @@ describe('src/group/module', () => {
         expect(log.indexOf('stop-done:x')).toBeLessThan(log.indexOf('settled:a'));
         expect(log.filter((entry) => entry === 'settled-done:x')).toHaveLength(2);
         expect(log).toContain('settled-done:a');
+    });
+
+    it('should be assignable to an IComponent of any event map', () => {
+        type Events = { ping: [{ id: string }, { correlationId?: string }] };
+
+        const group = defineComponentGroup();
+        const job = defineScheduledComponent({ schedule: '0 0 1 1 *', run: async () => {} });
+        const loop = defineIntervalComponent({ intervalMs: 1000, handler: () => {} });
+        const components: IComponent<Events>[] = [group, job, loop];
+
+        expect(components.every((component) => component.handle === undefined)).toBe(true);
     });
 });

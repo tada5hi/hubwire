@@ -150,6 +150,10 @@ export interface IScheduledComponent extends IComponent {
      * A pass must never await its own component's settled(): it would wait for itself.
      */
     settled(): Promise<void>;
+    /**
+     * Never set: it handles no events, so it fits an IComponent of any event map.
+     */
+    handle?: undefined;
 }
 
 /**

@@ -46,6 +46,10 @@ export interface IComponentGroup extends IComponent {
     stop(): Promise<void>;
     status(): ComponentGroupStatus;
     /**
+     * Never set: a group handles no events, so it fits an IComponent of any event map.
+     */
+    handle?: undefined;
+    /**
      * Resolves once every component's settled?.() resolved or failed. Never rejects.
      */
     settled(): Promise<void>;
