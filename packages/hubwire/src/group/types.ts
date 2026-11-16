@@ -28,7 +28,7 @@ export type ComponentGroupStatus = ComponentStatus & {
  * Named components started in add order and stopped as one: stop() on all (reverse order),
  * then settled?.() on all. A group is an IComponent itself, so groups nest.
  */
-export interface IComponentGroup extends IComponent {
+export interface IComponentGroup extends Omit<IComponent, 'handle'> {
     /**
      * Throws on a duplicate name, and while the group is starting, started or stopping.
      */
@@ -46,10 +46,6 @@ export interface IComponentGroup extends IComponent {
      */
     stop(): Promise<void>;
     status(): ComponentGroupStatus;
-    /**
-     * Never set: a group handles no events, so it fits an IComponent of any event map.
-     */
-    handle?: undefined;
     /**
      * Resolves once every component's settled?.() resolved or failed. Never rejects.
      */

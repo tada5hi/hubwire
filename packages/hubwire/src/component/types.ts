@@ -153,19 +153,16 @@ export type ScheduledComponentHooks = {
 };
 
 /**
- * A component that can be drained: an IComponent whose settled is not optional.
+ * A component that can be drained: an IComponent whose settled is not optional. It handles
+ * no events and has no `handle`, so it fits an IComponent of any event map.
  */
-export interface IScheduledComponent extends IComponent {
+export interface IScheduledComponent extends Omit<IComponent, 'handle'> {
     /**
      * Resolves once no pass is running (at once when none is). stop() does not
      * wait for a pass in flight; a shutdown awaits settled() after stop().
      * A pass must never await its own component's settled(): it would wait for itself.
      */
     settled(): Promise<void>;
-    /**
-     * Never set: it handles no events, so it fits an IComponent of any event map.
-     */
-    handle?: undefined;
 }
 
 /**
