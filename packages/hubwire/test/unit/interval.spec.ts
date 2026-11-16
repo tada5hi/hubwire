@@ -515,6 +515,149 @@ describe('src/component/interval', () => {
         await c.stop();
     });
 
+    describe('start() during a pass', () => {
+        const define = (clock: FakeClock, results: IntervalResult[], runOnStart = false) => {
+            const passes: number[] = [];
+            const gates: PromiseWithResolvers<void>[] = [];
+            let index = 0;
+            const component = defineIntervalComponent({
+                intervalMs: 1000,
+                runOnStart,
+                clock,
+                handler: async () => {
+                    passes.push(clock.now().getTime() - START);
+
+                    const gate = Promise.withResolvers<void>();
+
+                    gates.push(gate);
+                    await gate.promise;
+
+                    return results[index++];
+                },
+            });
+
+            return {
+                component, 
+                passes, 
+                gates, 
+            };
+        };
+
+        it('should keep the loop running when the pass returns { done: true }', async () => {
+            const clock = new FakeClock(START);
+            const {
+                component: c, 
+                passes, 
+                gates, 
+            } = define(clock, [{ done: true }]);
+
+            await c.start();
+            clock.advance(1000);
+            await drain();
+            await c.start();
+            gates[0]?.resolve();
+            await drain();
+            expect(clock.timerCount).toBe(1);
+            clock.advance(1000);
+            await drain();
+            expect(passes).toEqual([1000, 2000]);
+            gates[1]?.resolve();
+            await c.stop();
+        });
+
+        it('should run a new pass at once with runOnStart when the pass returns { done: true }', async () => {
+            const clock = new FakeClock(START);
+            const {
+                component: c, 
+                passes, 
+                gates, 
+            } = define(clock, [{ done: true }], true);
+            const started = c.start();
+
+            await drain();
+
+            // the start pass is in flight: this start() joins it
+            const again = c.start();
+
+            gates[0]?.resolve();
+            await Promise.all([started, again]);
+            await drain();
+            expect(passes).toEqual([0, 0]);
+            gates[1]?.resolve();
+            await drain();
+            expect(clock.timerCount).toBe(1);
+            await c.stop();
+        });
+
+        it('should change nothing when the pass returns nothing or { delayMs }', async () => {
+            const clock = new FakeClock(START);
+            const {
+                component: c, 
+                passes, 
+                gates, 
+            } = define(clock, [undefined, { delayMs: 500 }]);
+
+            await c.start();
+            clock.advance(1000);
+            await drain();
+            await c.start();
+            gates[0]?.resolve();
+            await drain();
+            expect(clock.timerCount).toBe(1);
+            clock.advance(1000);
+            await drain();
+            await c.start();
+            gates[1]?.resolve();
+            await drain();
+            expect(clock.timerCount).toBe(1);
+            clock.advance(500);
+            await drain();
+            expect(passes).toEqual([1000, 2000, 2500]);
+            gates[2]?.resolve();
+            await c.stop();
+        });
+
+        it('should end stopped after start() then stop() during the pass', async () => {
+            const clock = new FakeClock(START);
+            const {
+                component: c, 
+                passes, 
+                gates, 
+            } = define(clock, [{ done: true }]);
+
+            await c.start();
+            clock.advance(1000);
+            await drain();
+            await c.start();
+            await c.stop();
+            gates[0]?.resolve();
+            await c.settled();
+            await drain();
+            expect(clock.timerCount).toBe(0);
+            clock.advance(10_000);
+            await drain();
+            expect(passes).toEqual([1000]);
+        });
+
+        it('should stay a no-op while the loop only waits', async () => {
+            const clock = new FakeClock(START);
+            const {
+                component: c, 
+                passes, 
+                gates, 
+            } = define(clock, [{ done: true }]);
+
+            await c.start();
+            await c.start();
+            clock.advance(1000);
+            await drain();
+            gates[0]?.resolve();
+            await drain();
+            expect(passes).toEqual([1000]);
+            expect(clock.timerCount).toBe(0);
+        });
+    });
+
     it('should run one loop when started twice', async () => {
         const clock = new FakeClock(START);
         const { passes, handler } = record(clock);

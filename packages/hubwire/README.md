@@ -310,12 +310,15 @@ const indexer = defineIntervalComponent({
 - `{ delayMs }` must be a positive finite number; anything else counts as a failed pass.
   `{ done: true }` wins over `delayMs` and leaves the component as `stop()` would: no timer,
   `runningSince` unset, and a later `start()` begins a new loop (with `runOnStart` again).
+  A `start()` that arrives while a pass is in flight means "keep running": if that pass returns
+  `{ done: true }`, the loop begins again at once as a fresh `start()` would, so work queued
+  during the final pass is not dropped. `stop()` clears that request.
 - A failing pass (a throw, a rejection, an invalid `delayMs`) goes to `hooks.onError`, leaves
   `lastSuccessAt` as it was, and the loop waits `intervalMs`.
 - `stop()` aborts the signal of the pass in flight and arms nothing after it, whatever the pass
   returns; it does not wait for the pass, `settled()` does. A pass that throws because of the abort
   is reported to `hooks.onError` like any other failure.
-- A `start()` during a pass joins it; a `start()` on a running loop does nothing.
+- A `start()` during a pass joins it; a `start()` while the loop only waits does nothing.
 - `intervalMs` must be a positive finite number, else the factory throws. A wait longer than one
   timer can hold (2^31-1 ms) is armed in steps. There is no `lock` option.
 

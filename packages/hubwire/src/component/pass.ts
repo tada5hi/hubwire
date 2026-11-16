@@ -40,6 +40,9 @@ export function createPassRunner<T>(clock: IClock, hooks: Pick<ScheduledComponen
         isCurrent(value: number): boolean {
             return value === generation;
         },
+        isRunning(): boolean {
+            return pass !== undefined;
+        },
         /**
          * Runs `body` as the pass, or joins the pass in flight and resolves with its result.
          */

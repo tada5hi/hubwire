@@ -11,7 +11,10 @@ type Decision = { done: true } | { done: false, delayMs: number };
  * A background job on a fixed delay: a pass, then a wait of `intervalMs` from the moment
  * it settled, never overlapping. The pass's result can wait once for another delay or end
  * the loop (see IntervalResult). A failing pass is reported to hooks.onError and the loop
- * waits `intervalMs`. stop() aborts the signal of a pass in flight but does not wait for it;
+ * waits `intervalMs`. A start() while a pass is in flight means "keep running": if that pass
+ * returns `{ done: true }`, the loop begins again as a fresh start() would (a start() while the
+ * loop only waits does nothing). stop() clears that request, aborts the signal of a pass in
+ * flight but does not wait for it;
  * a shutdown awaits settled() after stop(). A pass must never await its own component's
  * settled(): it would deadlock.
  */
@@ -27,6 +30,8 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
 
     let timer: { clear(): void } | undefined;
     let looping = false;
+    // a start() arrived while a pass was in flight: a `{ done: true }` of that pass must not end the loop
+    let requested = false;
 
     const decide = (result: IntervalResult): Decision => {
         if (typeof result !== 'object' || result === null) {
@@ -69,8 +74,16 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
             return;
         }
 
+        const restart = requested;
+
+        requested = false;
+
         if (decision.done) {
             halt();
+
+            if (restart) {
+                void begin();
+            }
 
             return;
         }
@@ -96,25 +109,34 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
         }, Math.min(until - clock.now().getTime(), MAX_TIMER_MS));
     }
 
+    async function begin() {
+        if (looping) {
+            return;
+        }
+
+        const current = runner.next();
+
+        if (options.runOnStart) {
+            follow(current, await execute());
+
+            return;
+        }
+
+        follow(current, { done: false, delayMs: intervalMs });
+    }
+
     return {
         async start() {
-            if (looping) {
-                return;
+            if (runner.isRunning()) {
+                requested = true;
             }
 
-            const current = runner.next();
-
-            if (options.runOnStart) {
-                follow(current, await execute());
-
-                return;
-            }
-
-            follow(current, { done: false, delayMs: intervalMs });
+            await begin();
         },
         async stop() {
             // does not wait for a pass in flight (a pass may stop its own component), see settled();
             // only aborts its signal; nothing is armed after it
+            requested = false;
             halt();
             runner.abort();
         },
