@@ -902,6 +902,60 @@ describe('src/component/scheduled', () => {
         });
     });
 
+    it('should hand a pass started after stop() and start() a signal that is not aborted', async () => {
+        const clock = new FakeClock(Date.parse('2030-01-15T10:00:00.500Z'));
+        const gate = Promise.withResolvers<void>();
+        const signals: AbortSignal[] = [];
+        const c = defineScheduledComponent({
+            schedule: '* * * * * *',
+            clock,
+            run: async ({ signal }) => {
+                signals.push(signal);
+
+                if (signals.length === 1) {
+                    await gate.promise;
+                }
+            },
+        });
+        const started = c.start();
+
+        await c.stop();
+        gate.resolve();
+        await started;
+        await c.settled();
+        expect(signals[0]?.aborted).toBe(true);
+
+        await c.start(); // the start pass of the restart
+        clock.advance(500); // and the tick at :01
+        await drain();
+        expect(signals).toHaveLength(3);
+        expect(signals[1]?.aborted).toBe(false);
+        expect(signals[2]?.aborted).toBe(false);
+        expect(signals[0]?.aborted).toBe(true);
+        await c.stop();
+    });
+
+    it('should abort the signal of a pass that stops its own component and still settle', async () => {
+        const clock = new FakeClock();
+        const seen: boolean[] = [];
+        const c = defineScheduledComponent({
+            schedule: '0 0 1 1 *',
+            clock,
+            run: async ({ signal }) => {
+                seen.push(signal.aborted);
+                await c.stop();
+                seen.push(signal.aborted);
+            },
+        });
+
+        await c.start();
+        await c.settled();
+        expect(seen).toEqual([false, true]);
+        expect(c.status().runningSince).toBeUndefined();
+        expect(c.status().lastSuccessAt).toBe(0);
+        expect(clock.timerCount).toBe(0);
+    });
+
     it('should not start a second pass when a run calls start() before its first await', async () => {
         const clock = new FakeClock();
         const gate = Promise.withResolvers<void>();
