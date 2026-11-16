@@ -1,3 +1,4 @@
+export * from './clock';
 export * from './component';
 export * from './dispatcher';
 export * from './hook';

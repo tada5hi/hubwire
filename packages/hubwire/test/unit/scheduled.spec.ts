@@ -5,8 +5,8 @@ import {
     it,
     vi,
 } from 'vitest';
-import { MemoryScheduleLock } from '@hubwire/test';
-import { defineScheduledComponent } from '../../src';
+import { FakeClock, MemoryScheduleLock, drain } from '@hubwire/test';
+import { defineScheduledComponent, systemClock } from '../../src';
 
 const wait = (ms: number) => new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -727,6 +727,165 @@ describe('src/component/scheduled', () => {
                 expect(seen).toEqual(['2026-11-01T07:00:00.000Z']); // 02:00 EST
             });
         });
+    });
+
+    describe('clock', () => {
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('should arm no timer of its own and run each slot when the clock reaches it', async () => {
+            // fakes setTimeout only: Date stays real, getTimerCount() counts the global timers
+            vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+            const baseline = vi.getTimerCount();
+            const clock = new FakeClock(new Date('2030-01-15T10:00:00.500Z'));
+            const seen: string[] = [];
+            const c = defineScheduledComponent({
+                schedule: '* * * * * *',
+                clock,
+                run: async ({ scheduledAt }) => {
+                    seen.push(scheduledAt.toISOString());
+                },
+            });
+
+            await c.start();
+            expect(seen).toEqual(['2030-01-15T10:00:00.500Z']);
+            expect(vi.getTimerCount()).toBe(baseline);
+            expect(clock.timerCount).toBe(1);
+
+            clock.advance(499);
+            await drain();
+            expect(seen).toHaveLength(1);
+
+            clock.advance(1);
+            await drain();
+            expect(seen).toEqual(['2030-01-15T10:00:00.500Z', '2030-01-15T10:00:01.000Z']);
+            expect(vi.getTimerCount()).toBe(baseline);
+
+            await c.stop();
+            expect(clock.timerCount).toBe(0);
+        });
+
+        it('should take status() times from the clock', async () => {
+            const clock = new FakeClock(new Date('2030-01-15T10:00:00.000Z'));
+            const gate = Promise.withResolvers<void>();
+            let passes = 0;
+            const c = defineScheduledComponent({
+                schedule: '* * * * * *',
+                clock,
+                run: async () => {
+                    passes++;
+
+                    if (passes === 2) {
+                        await gate.promise;
+                    }
+                },
+            });
+
+            await c.start();
+            expect(c.status()).toEqual({ lastSuccessAt: Date.parse('2030-01-15T10:00:00.000Z'), runningSince: undefined });
+
+            clock.advance(1000);
+            expect(c.status().runningSince).toBe(Date.parse('2030-01-15T10:00:01.000Z'));
+
+            clock.advance(250);
+            gate.resolve();
+            await c.settled();
+            expect(c.status()).toEqual({ lastSuccessAt: Date.parse('2030-01-15T10:00:01.250Z'), runningSince: undefined });
+            await c.stop();
+        });
+
+        it('should evaluate the first slot from the clock\'s time', async () => {
+            const clock = new FakeClock(new Date('2030-01-15T10:00:00.000Z'));
+            const seen: string[] = [];
+            const c = defineScheduledComponent({
+                schedule: '0 0 * * *',
+                timezone: 'UTC',
+                runOnStart: false,
+                clock,
+                run: async ({ scheduledAt }) => {
+                    seen.push(scheduledAt.toISOString());
+                },
+            });
+
+            await c.start();
+            clock.advance(14 * 60 * 60 * 1000);
+            await drain();
+            await c.stop();
+            expect(seen).toEqual(['2030-01-16T00:00:00.000Z']);
+        });
+
+        it('should hand the pass a signal that stop() aborts', async () => {
+            const clock = new FakeClock();
+            const gate = Promise.withResolvers<void>();
+            const signals: AbortSignal[] = [];
+            const c = defineScheduledComponent({
+                schedule: '0 0 1 1 *',
+                clock,
+                run: async ({ signal }) => {
+                    signals.push(signal);
+                    await gate.promise;
+                },
+            });
+            const started = c.start();
+
+            expect(signals[0]?.aborted).toBe(false);
+            await c.stop();
+            expect(signals[0]?.aborted).toBe(true);
+            gate.resolve();
+            await started;
+        });
+    });
+
+    it('should not start a second pass when a run calls start() before its first await', async () => {
+        const clock = new FakeClock();
+        const gate = Promise.withResolvers<void>();
+        const signals: AbortSignal[] = [];
+        const c = defineScheduledComponent({
+            schedule: '0 0 1 1 *',
+            clock,
+            run: async ({ signal }) => {
+                signals.push(signal);
+                void c.start();
+                await gate.promise;
+            },
+        });
+        const started = c.start();
+
+        await drain();
+        expect(signals).toHaveLength(1);
+        await c.stop();
+        expect(signals[0]?.aborted).toBe(true);
+        gate.resolve();
+        await started;
+        await c.settled();
+    });
+
+    it('should export a system clock over the global timers', async () => {
+        vi.useFakeTimers({ now: new Date('2026-01-15T10:00:00.000Z') });
+
+        try {
+            const baseline = vi.getTimerCount();
+            let fired = 0;
+
+            expect(systemClock.now().toISOString()).toBe('2026-01-15T10:00:00.000Z');
+
+            const timer = systemClock.setTimeout(() => {
+                fired++;
+            }, 1000);
+
+            expect(vi.getTimerCount()).toBe(baseline + 1);
+            systemClock.setTimeout(() => {
+                fired++;
+            }, 500);
+            timer.clear();
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(fired).toBe(1);
+            expect(vi.getTimerCount()).toBe(baseline);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('should reject an invalid timezone at definition, before any pass', () => {

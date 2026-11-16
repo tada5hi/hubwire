@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { FakeClock } from '@hubwire/test';
 import { Component } from '../../src';
 import type { ComponentHandleOptions, ComponentMetadata } from '../../src';
 
@@ -192,5 +193,23 @@ describe('src/component', () => {
 
         await expect(component.start()).resolves.toBeUndefined();
         await expect(component.stop()).resolves.toBeUndefined();
+    });
+
+    it('should take status() times from the given clock', async () => {
+        const clock = new FakeClock(new Date('2030-01-15T10:00:00.000Z'));
+        const gate = Promise.withResolvers<void>();
+        const component = new Component<{ run: Ev }>({ clock });
+
+        component.mount('run', async () => {
+            await gate.promise;
+        });
+
+        const handled = component.handle('run', {});
+
+        expect(component.status()).toEqual({ lastSuccessAt: undefined, runningSince: Date.parse('2030-01-15T10:00:00.000Z') });
+        clock.advance(500);
+        gate.resolve();
+        await handled;
+        expect(component.status()).toEqual({ lastSuccessAt: Date.parse('2030-01-15T10:00:00.500Z'), runningSince: undefined });
     });
 });

@@ -53,7 +53,8 @@ are left behind (`close()` deletes no queue), so point it at a throwaway vhost.
 | Export | Purpose |
 |---|---|
 | `FakeMessageBus` | An `IMessageBus` that records publishes (`published`) and consumes (`consumed`) and never delivers. Set `publishError`, `consumeError`, `cancelError` or `consumeGate` to drive a failure or a race |
-| `MemoryScheduleLock` | An in-process `IScheduleLock`. `acquired` records every won key with its `ttlMs`; set `acquireError` to make `acquire()` reject. Expiry reads `Date.now()`, so vitest's fake timers drive it |
+| `MemoryScheduleLock` | An in-process `IScheduleLock`. `acquired` records every won key with its `ttlMs`; set `acquireError` to make `acquire()` reject. Expiry reads the `clock` option (default `systemClock`, so vitest's fake timers drive it; `new MemoryScheduleLock({ clock: new FakeClock() })` follows a `FakeClock`) |
+| `FakeClock` | An `IClock` that moves only when advanced: `new FakeClock(start?)`, `advance(ms)` fires the timers due in the span in order (also the ones a fired timer arms within it) and awaits nothing; `timerCount` counts the armed timers. A delay outside 1 .. 2^31-1 ms counts as 1 ms, as for `setTimeout` |
 | `drain()` | Resolves once the microtasks queued so far ran. The memory driver delivers on microtasks, so a whole publish → handler → publish chain is done |
 
 ```typescript
@@ -80,6 +81,22 @@ const define = () => defineScheduledComponent({ name: 'cleanup', schedule: '* * 
 await Promise.all([define().start(), define().start()]);
 await vi.advanceTimersByTimeAsync(1000);
 lock.acquired; // [{ key: 'cleanup:<tick ISO time>', ttlMs: 60000 }]: one pass per tick
+```
+
+A component on a `FakeClock`; `drain()` lets the pass a timer started settle:
+
+```typescript
+import { defineIntervalComponent } from 'hubwire';
+import { FakeClock, drain } from '@hubwire/test';
+
+const clock = new FakeClock(new Date('2030-01-01T00:00:00Z'));
+let passes = 0;
+const job = defineIntervalComponent({ intervalMs: 1000, clock, handler: () => { passes++; } });
+
+await job.start();
+clock.advance(1000);
+await drain();
+passes; // 1
 ```
 
 ## License

@@ -1,4 +1,6 @@
 /* eslint-disable unicorn/prefer-promise-try -- Keep compatibility with the published Node.js runtime requirement. */
+import { systemClock } from '../clock';
+import type { IClock } from '../clock';
 import type { ObjectLiteral } from '../types';
 import type {
     ComponentEventMap,
@@ -7,6 +9,7 @@ import type {
     ComponentHandlerContext,
     ComponentHandlerFn,
     ComponentMetadata,
+    ComponentOptions,
     ComponentStatus,
     IComponent,
 } from './types';
@@ -38,6 +41,12 @@ export class Component<
     protected runningSince: number | undefined;
 
     protected lastSuccessAt: number | undefined;
+
+    protected clock: IClock;
+
+    constructor(options: ComponentOptions = {}) {
+        this.clock = options.clock ?? systemClock;
+    }
 
     /**
      * Acquire background work (consumers, schedules). Nothing by default.
@@ -120,11 +129,11 @@ export class Component<
         options: AnyHandleOptions = {},
     ): Promise<void> {
         this.running++;
-        this.runningSince ??= Date.now();
+        this.runningSince ??= this.clock.now().getTime();
 
         try {
             await this.dispatch(key, data, metadata, options);
-            this.lastSuccessAt = Date.now();
+            this.lastSuccessAt = this.clock.now().getTime();
         } finally {
             this.running--;
 

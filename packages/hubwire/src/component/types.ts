@@ -1,3 +1,4 @@
+import type { IClock } from '../clock';
 import type { ObjectLiteral } from '../types';
 
 export type ComponentMetadata = {
@@ -7,6 +8,13 @@ export type ComponentMetadata = {
 
 export type ComponentEventMapValue = [ObjectLiteral, ComponentMetadata];
 export type ComponentEventMap = Record<string, ComponentEventMapValue>;
+
+export type ComponentOptions = {
+    /**
+     * Where status() times come from. Default: systemClock
+     */
+    clock?: IClock,
+};
 
 export type ComponentStatus = {
     /**
@@ -134,6 +142,10 @@ export type ScheduledComponentRunContext = {
      * for the start pass, the time start() ran it.
      */
     scheduledAt: Date,
+    /**
+     * Aborted by stop() while the pass runs. The pass may end early; settled() still waits for it.
+     */
+    signal: AbortSignal,
 };
 
 type ScheduledComponentBaseOptions = {
@@ -156,6 +168,10 @@ type ScheduledComponentBaseOptions = {
      */
     runOnStart?: boolean,
     hooks?: ScheduledComponentHooks,
+    /**
+     * Time and timers of the schedule and of status(). Default: systemClock
+     */
+    clock?: IClock,
 };
 
 export type ScheduledComponentOptions = ScheduledComponentBaseOptions & (
@@ -181,3 +197,46 @@ export type ScheduledComponentOptions = ScheduledComponentBaseOptions & (
         lockTtlMs?: number,
     }
 );
+
+export type IntervalComponentHooks = Pick<ScheduledComponentHooks, 'onError'>;
+
+export type IntervalComponentHandlerContext = {
+    /**
+     * Aborted by stop() while the pass runs. The pass may end early; settled() still waits for it.
+     */
+    signal: AbortSignal,
+};
+
+/**
+ * What a pass decides about the loop: nothing waits `intervalMs`; `{ delayMs }` waits that
+ * long once (a positive finite number, else the pass counts as failed); `{ done: true }`
+ * ends the loop, as stop() would, until the next start(). `done` wins over `delayMs`.
+ */
+export type IntervalResult = void | {
+    delayMs?: number,
+    done?: boolean,
+};
+
+export type IntervalComponentOptions = {
+    /**
+     * The wait between the end of one pass and the start of the next, in ms. A positive finite number.
+     */
+    intervalMs: number,
+    /**
+     * One pass. Its result decides what follows (see IntervalResult).
+     */
+    handler: (context: IntervalComponentHandlerContext) => Promise<IntervalResult> | IntervalResult,
+    /**
+     * Names the component for its owner (logs, status pages); hubwire does not use it.
+     */
+    name?: string,
+    /**
+     * Run one pass in start() before the first wait. Default: false
+     */
+    runOnStart?: boolean,
+    hooks?: IntervalComponentHooks,
+    /**
+     * Time and timers of the loop and of status(). Default: systemClock
+     */
+    clock?: IClock,
+};
