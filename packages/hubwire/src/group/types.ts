@@ -35,7 +35,9 @@ export type ComponentGroupStatus = ComponentStatus & {
  * stop(): never rejects; a component that fails to stop or settle is reported to
  * `onStopFailed`. Does nothing when not started. During a start() in flight it stops the
  * component being started at once (its start() may wait for that), starts none after it,
- * then waits for the start().
+ * then waits for the start() and stops that component again (its first stop() may have
+ * come too early), so a component's stop() must be safe to call twice. A component must
+ * never await its group's stop() from its own start() or from a pass: it would wait for itself.
  */
 export interface IComponentGroup extends Omit<IComponent, 'handle'> {
     /**

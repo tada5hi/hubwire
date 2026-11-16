@@ -202,7 +202,12 @@ components.status();      // { components: [{ name: 'cleaner', lastSuccessAt, â€
   `onStopFailed(name, error)`. A second `stop()` does nothing until the next `start()`; a `stop()`
   during a `start()` stops the component being started at once (its `start()` may only resolve
   once it is stopped, like a scheduled component's start pass), starts none after it, then waits
-  for the `start()` and stops the rest.
+  for the `start()` and stops them all. That component is stopped a second time once its
+  `start()` resolved, as its first `stop()` may have come before there was anything to stop: a
+  component's `stop()` must be safe to call twice. If its `start()` rejects instead, the group
+  still waits for that `stop()` and settles it.
+- A component must never await its group's `stop()` from its own `start()` or from a pass: the
+  group waits for both, so it would wait for itself. Call it without awaiting.
 - `settled()` resolves once every component's `settled?.()` resolved or failed; it never rejects.
 - `add()` throws on a duplicate name, and while the group is starting, started or stopping.
 - `status()` lists each component's own status under its name, in add order. The group sets no
@@ -383,9 +388,12 @@ interface IClock {
 
 `systemClock` (`Date.now()` and the global `setTimeout`, as they are) is the default. Pass `clock`
 to `defineScheduledComponent`, `defineIntervalComponent` or `new Component({ clock })` to drive a
-component from your own clock, e.g. `FakeClock` from `@hubwire/test` in a test, or a monotonic one
-(`now: () => performance.timeOrigin + performance.now()`). `status()` reports `clock.now()` as is;
-a `scheduledAt` taken from it drops the fraction. The message bus keeps reading `Date.now()`.
+component from your own clock, e.g. `FakeClock` from `@hubwire/test` in a test, or a finer one
+(`now: () => performance.timeOrigin + performance.now()`). Such a clock is monotonic: it does not
+follow a corrected system time and stands still while the machine sleeps, so it drifts from the
+wall clock. Do not use it for a scheduled component with a `lock`: the slots, the lock keys and
+the late check would be measured on a clock the other replicas do not share. `status()` reports
+`clock.now()` as is; a `scheduledAt` taken from it drops the fraction. The message bus keeps reading `Date.now()`.
 
 A started scheduled or interval component keeps the process alive until `stop()`. Pass
 `unref: true` to either factory to `unref()` every timer it arms, so a CLI command or a one-off

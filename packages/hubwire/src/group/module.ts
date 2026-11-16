@@ -28,14 +28,20 @@ export function defineComponentGroup(options: ComponentGroupOptions = {}): IComp
     const stop = ({ name, component }: Entry) => call(() => component.stop()).catch(report(name));
 
     /**
-     * stop() on every entry (reverse add order) before awaiting any, then settled?.() on all.
-     * An entry in `stopped` was stopped already (during its start()): its stop() is only awaited.
-     * Never rejects.
+     * stop() on every started entry (reverse add order) before awaiting any, then settled?.()
+     * on all. `early` holds the stop() made on an entry during its start(): it is awaited, and
+     * the entry is stopped again if its start() resolved (the early one may have found nothing
+     * to stop yet) or only settled if its start() failed. Never rejects.
      */
-    const sweep = async (started: Entry[], stopped: Map<Entry, Promise<void>>) => {
-        const reversed = [...started].reverse();
+    const sweep = async (started: Entry[], early: Map<Entry, Promise<void>>) => {
+        // an entry stopped during a start() that then failed is not in `started`; it was added last
+        const failed = early.keys().filter((entry) => !started.includes(entry));
+        const reversed = [...failed, ...[...started].reverse()];
 
-        await Promise.all(reversed.map((entry) => stopped.get(entry) ?? stop(entry)));
+        await Promise.all(reversed.map((entry) => Promise.all([
+            early.get(entry),
+            started.includes(entry) ? stop(entry) : undefined,
+        ])));
         await Promise.all(reversed.map(({ name, component }) => call(() => component.settled?.()).catch(report(name))));
     };
 
@@ -43,13 +49,13 @@ export function defineComponentGroup(options: ComponentGroupOptions = {}): IComp
         active = true;
 
         const started: Entry[] = [];
-        const stopped = new Map<Entry, Promise<void>>();
+        const early = new Map<Entry, Promise<void>>();
         let starting: Entry | undefined;
         // a stop() during start(): the component being started is stopped at once, since its
         // start() may only resolve once it is (a scheduled component's start pass waiting for its abort)
         const onAbort = () => {
             if (starting) {
-                stopped.set(starting, stop(starting));
+                early.set(starting, stop(starting));
             }
         };
 
@@ -63,22 +69,27 @@ export function defineComponentGroup(options: ComponentGroupOptions = {}): IComp
                 }
 
                 starting = entry;
-                await call(() => entry.component.start());
-                starting = undefined;
+
+                try {
+                    await call(() => entry.component.start());
+                } finally {
+                    // before any cleanup: a stop() during it must not reach a component whose start() ended
+                    starting = undefined;
+                }
+
                 started.push(entry);
             }
         } catch (error) {
-            await sweep(started, stopped);
+            await sweep(started, early);
             active = false;
 
             throw error;
         } finally {
-            starting = undefined;
             signal.removeEventListener('abort', onAbort);
         }
 
         return async () => {
-            await sweep(started, stopped);
+            await sweep(started, early);
             active = false;
         };
     });

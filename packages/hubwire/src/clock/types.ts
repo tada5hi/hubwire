@@ -16,7 +16,8 @@ export type ClockTimer = {
  */
 export interface IClock {
     /**
-     * Epoch milliseconds; fractions are allowed (e.g. `performance.timeOrigin + performance.now()`).
+     * Epoch milliseconds; fractions are allowed (e.g. `performance.timeOrigin + performance.now()`,
+     * which drifts from the wall clock: not for a scheduled component with a lock).
      */
     now(): number;
     /**

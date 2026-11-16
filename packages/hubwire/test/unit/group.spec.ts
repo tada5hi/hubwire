@@ -388,17 +388,99 @@ describe('src/group/module', () => {
 
         gate.resolve();
         await Promise.all([started, stopped]);
+        // b is stopped again once its start() resolved: its first stop() may have come too early
         expect(log.slice(5)).toEqual([
             'start-done:b',
+            'stop:b',
             'stop:a',
+            'stop-done:b',
             'stop-done:a',
             'settled:b',
             'settled:a',
             'settled-done:b',
             'settled-done:a',
         ]);
-        expect(components[1]!.stops).toBe(1);
+        expect(components[1]!.stops).toBe(2);
         expect(components[2]!.starts).toBe(0);
+    });
+
+    it('should not leave a component running whose stop() does nothing until its start() finished', async () => {
+        const gate = Promise.withResolvers<void>();
+        let running = false;
+        const group = defineComponentGroup();
+
+        group.add('late', {
+            start: async () => {
+                await gate.promise;
+                running = true;
+            },
+            stop: async () => {
+                running = false;
+            },
+            status: () => ({}),
+        });
+
+        const started = group.start();
+
+        await drain();
+
+        const stopped = group.stop();
+
+        gate.resolve();
+        await Promise.all([started, stopped]);
+        expect(running).toBe(false);
+    });
+
+    it('should wait for the stop() of a component whose start() rejects after it was stopped, and settle it', async () => {
+        const { group, components } = setup(['a']);
+        const startGate = Promise.withResolvers<void>();
+        const stopGate = Promise.withResolvers<void>();
+
+        components[0]!.startGate = startGate.promise;
+        components[0]!.startFailure = 'reject';
+        components[0]!.stopGate = stopGate.promise;
+
+        const started = group.start();
+        const failure = expect(started).rejects.toThrow('start a');
+
+        await drain();
+
+        let done = false;
+        const stopped = group.stop().then(() => {
+            done = true;
+        });
+
+        startGate.resolve();
+        await drain();
+        expect(done).toBe(false);
+
+        stopGate.resolve();
+        await stopped;
+        await failure;
+        expect(components[0]!.stops).toBe(1);
+        expect(components[0]!.settles).toBe(1);
+    });
+
+    it('should not stop a component whose start() failed when stopped during the cleanup', async () => {
+        const { group, components } = setup(['a', 'b']);
+        const settledGate = Promise.withResolvers<void>();
+
+        components[0]!.settledGate = settledGate.promise;
+        components[1]!.startFailure = 'throw';
+
+        const started = group.start();
+        const failure = expect(started).rejects.toThrow('start b');
+
+        await drain();
+
+        const stopped = group.stop();
+
+        await drain();
+        settledGate.resolve();
+        await stopped;
+        await failure;
+        expect(components[0]!.stops).toBe(1);
+        expect(components[1]!.stops).toBe(0);
     });
 
     it('should start nothing when stopped right after start()', async () => {
@@ -426,7 +508,8 @@ describe('src/group/module', () => {
 
         gate.resolve();
         await Promise.all([started, stopped]);
-        expect(failures).toEqual([['a', 'stop a']]);
+        // stopped during its start(), and again once that resolved
+        expect(failures).toEqual([['a', 'stop a'], ['a', 'stop a']]);
         expect(components[0]!.settles).toBe(1);
     });
 
