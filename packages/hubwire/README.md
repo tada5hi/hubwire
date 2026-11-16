@@ -318,7 +318,11 @@ const indexer = defineIntervalComponent({
 - `stop()` aborts the signal of the pass in flight and arms nothing after it, whatever the pass
   returns; it does not wait for the pass, `settled()` does. A pass that throws because of the abort
   is reported to `hooks.onError` like any other failure.
-- A `start()` during a pass joins it; a `start()` while the loop only waits does nothing.
+- A `start()` during a pass joins it: it resolves once the pass settled, also when the pass's own
+  handler called it. A `start()` while the loop only waits does nothing.
+- A loop started again while a pass of the stopped one is still in flight never runs a second
+  pass next to it: with `runOnStart` it joins that pass, else its first wait starts when the
+  pass settled.
 - `intervalMs` must be a positive finite number, else the factory throws. A wait longer than one
   timer can hold (2^31-1 ms) is armed in steps. There is no `lock` option.
 

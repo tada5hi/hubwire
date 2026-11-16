@@ -554,7 +554,7 @@ describe('src/component/interval', () => {
             await c.start();
             clock.advance(1000);
             await drain();
-            await c.start();
+            void c.start();
             gates[0]?.resolve();
             await drain();
             expect(clock.timerCount).toBe(1);
@@ -600,13 +600,13 @@ describe('src/component/interval', () => {
             await c.start();
             clock.advance(1000);
             await drain();
-            await c.start();
+            void c.start();
             gates[0]?.resolve();
             await drain();
             expect(clock.timerCount).toBe(1);
             clock.advance(1000);
             await drain();
-            await c.start();
+            void c.start();
             gates[1]?.resolve();
             await drain();
             expect(clock.timerCount).toBe(1);
@@ -628,7 +628,7 @@ describe('src/component/interval', () => {
             await c.start();
             clock.advance(1000);
             await drain();
-            await c.start();
+            void c.start();
             await c.stop();
             gates[0]?.resolve();
             await c.settled();
@@ -655,6 +655,138 @@ describe('src/component/interval', () => {
             await drain();
             expect(passes).toEqual([1000]);
             expect(clock.timerCount).toBe(0);
+        });
+    });
+
+    describe('a pass in flight', () => {
+        it('should start the first wait of a loop restarted during a pass when that pass settled', async () => {
+            const clock = new FakeClock(START);
+            const passes: number[] = [];
+            const gate = Promise.withResolvers<void>();
+            const c = defineIntervalComponent({
+                intervalMs: 1000,
+                clock,
+                handler: async () => {
+                    passes.push(clock.now().getTime() - START);
+
+                    if (passes.length === 1) {
+                        await gate.promise;
+                    }
+                },
+            });
+
+            await c.start();
+            clock.advance(1000);
+            await drain();
+            clock.advance(100);
+            await c.stop();
+            void c.start();
+            clock.advance(400);
+            gate.resolve();
+            await drain();
+            clock.advance(600);
+            await drain();
+            expect(passes).toEqual([1000]);
+            clock.advance(399);
+            await drain();
+            expect(passes).toEqual([1000]);
+            clock.advance(1);
+            await drain();
+            expect(passes).toEqual([1000, 2500]);
+            expect(clock.timerCount).toBe(1);
+            await c.stop();
+        });
+
+        it('should join the pass in flight when restarted with runOnStart', async () => {
+            const clock = new FakeClock(START);
+            const passes: number[] = [];
+            const gate = Promise.withResolvers<void>();
+            const c = defineIntervalComponent({
+                intervalMs: 1000,
+                runOnStart: true,
+                clock,
+                handler: async () => {
+                    passes.push(clock.now().getTime() - START);
+
+                    if (passes.length === 1) {
+                        await gate.promise;
+                    }
+                },
+            });
+            const started = c.start();
+
+            clock.advance(100);
+            await c.stop();
+
+            const restarted = c.start();
+
+            clock.advance(400);
+            gate.resolve();
+            await Promise.all([started, restarted]);
+            expect(passes).toEqual([0]);
+            clock.advance(999);
+            await drain();
+            expect(passes).toEqual([0]);
+            clock.advance(1);
+            await drain();
+            expect(passes).toEqual([0, 1500]);
+            await c.stop();
+        });
+
+        it('should not resolve a start() during a timer-started pass before the pass settled', async () => {
+            const clock = new FakeClock(START);
+            const gate = Promise.withResolvers<void>();
+            let settled = false;
+            const c = defineIntervalComponent({
+                intervalMs: 1000,
+                clock,
+                handler: async () => {
+                    await gate.promise;
+                    settled = true;
+                },
+            });
+
+            await c.start();
+            clock.advance(1000);
+            await drain();
+
+            const joined = c.start().then(() => settled);
+
+            await drain();
+            gate.resolve();
+            await expect(joined).resolves.toBe(true);
+            await c.stop();
+        });
+
+        it('should not start a second pass when a handler calls start() before its first await', async () => {
+            const clock = new FakeClock(START);
+            const gate = Promise.withResolvers<void>();
+            const signals: AbortSignal[] = [];
+            let running = 0;
+            let maxRunning = 0;
+            const c = defineIntervalComponent({
+                intervalMs: 1000,
+                runOnStart: true,
+                clock,
+                handler: async ({ signal }) => {
+                    signals.push(signal);
+                    running++;
+                    maxRunning = Math.max(maxRunning, running);
+                    void c.start();
+                    await gate.promise;
+                    running--;
+                },
+            });
+            const started = c.start();
+
+            await drain();
+            expect(signals).toHaveLength(1);
+            await c.stop();
+            expect(signals[0]?.aborted).toBe(true);
+            gate.resolve();
+            await started;
+            await c.settled();
+            expect(maxRunning).toBe(1);
         });
     });
 
@@ -704,12 +836,15 @@ describe('src/component/interval', () => {
         clock.advance(1000);
         await drain();
         await c.stop();
-        await c.start();
-        // the new loop's first wait ends while the old pass still runs: it joins it
+
+        // joins the old pass: resolves once it settled
+        const restarted = c.start();
+
         clock.advance(1000);
         await drain();
         expect(passes).toBe(1);
         gate.resolve();
+        await restarted;
         await drain();
         clock.advance(1000);
         await drain();

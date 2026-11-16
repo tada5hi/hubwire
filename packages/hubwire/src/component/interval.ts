@@ -12,8 +12,10 @@ type Decision = { done: true } | { done: false, delayMs: number };
  * it settled, never overlapping. The pass's result can wait once for another delay or end
  * the loop (see IntervalResult). A failing pass is reported to hooks.onError and the loop
  * waits `intervalMs`. A start() while a pass is in flight means "keep running": if that pass
- * returns `{ done: true }`, the loop begins again as a fresh start() would (a start() while the
- * loop only waits does nothing). stop() clears that request, aborts the signal of a pass in
+ * returns `{ done: true }`, the loop begins again as a fresh start() would; such a start() resolves
+ * once that pass settled (a start() while the loop only waits does nothing). A loop that begins
+ * while a pass is in flight waits for it: with runOnStart it follows that pass's result, else its
+ * first wait starts when the pass settled. stop() clears that request, aborts the signal of a pass in
  * flight but does not wait for it;
  * a shutdown awaits settled() after stop(). A pass must never await its own component's
  * settled(): it would deadlock.
@@ -117,21 +119,29 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
         const current = runner.next();
 
         if (options.runOnStart) {
+            // runs a pass, or joins the one in flight and follows its result
             follow(current, await execute());
 
             return;
         }
 
+        // a pass in flight (of a loop stopped meanwhile): the first wait starts when it settled
+        await runner.inFlight();
         follow(current, { done: false, delayMs: intervalMs });
     }
 
     return {
         async start() {
-            if (runner.isRunning()) {
+            const inFlight = runner.inFlight();
+
+            if (inFlight) {
+                // keep running: a `{ done: true }` of this pass begins the loop again
                 requested = true;
             }
 
             await begin();
+            // joins the pass in flight also when the loop is already running
+            await inFlight;
         },
         async stop() {
             // does not wait for a pass in flight (a pass may stop its own component), see settled();

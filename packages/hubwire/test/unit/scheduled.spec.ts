@@ -838,6 +838,30 @@ describe('src/component/scheduled', () => {
         });
     });
 
+    it('should not start a second pass when a run calls start() before its first await', async () => {
+        const clock = new FakeClock();
+        const gate = Promise.withResolvers<void>();
+        const signals: AbortSignal[] = [];
+        const c = defineScheduledComponent({
+            schedule: '0 0 1 1 *',
+            clock,
+            run: async ({ signal }) => {
+                signals.push(signal);
+                void c.start();
+                await gate.promise;
+            },
+        });
+        const started = c.start();
+
+        await drain();
+        expect(signals).toHaveLength(1);
+        await c.stop();
+        expect(signals[0]?.aborted).toBe(true);
+        gate.resolve();
+        await started;
+        await c.settled();
+    });
+
     it('should export a system clock over the global timers', async () => {
         vi.useFakeTimers({ now: new Date('2026-01-15T10:00:00.000Z') });
 

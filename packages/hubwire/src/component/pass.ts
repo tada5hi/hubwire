@@ -16,6 +16,10 @@ export function createPassRunner<T>(clock: IClock, hooks: Pick<ScheduledComponen
     // joins it instead of running a second pass next to it
     let pass: Promise<T> | undefined;
     let controller: AbortController | undefined;
+    // true while execute() runs a body up to its first await, before `pass` is stored: a pass
+    // requested from there (a handler that calls start() at once) joins it through `reentry`
+    let entering = false;
+    let reentry: PromiseWithResolvers<T> | undefined;
 
     const run = async (body: (signal: AbortSignal) => Promise<T>) => {
         // one pass at a time (see execute()), so one controller at a time
@@ -40,19 +44,55 @@ export function createPassRunner<T>(clock: IClock, hooks: Pick<ScheduledComponen
         isCurrent(value: number): boolean {
             return value === generation;
         },
-        isRunning(): boolean {
-            return pass !== undefined;
+        /**
+         * Resolves once the pass in flight settled; undefined when none is.
+         */
+        inFlight(): Promise<unknown> | undefined {
+            if (entering) {
+                reentry ??= Promise.withResolvers<T>();
+
+                return reentry.promise;
+            }
+
+            return pass;
         },
         /**
          * Runs `body` as the pass, or joins the pass in flight and resolves with its result.
          */
         execute(body: (signal: AbortSignal) => Promise<T>): Promise<T> {
-            // cleared asynchronously: a body that throws synchronously must not leave a settled pass behind
-            pass ??= run(body).finally(() => {
-                pass = undefined;
-            });
+            if (pass) {
+                return pass;
+            }
 
-            return pass;
+            if (entering) {
+                reentry ??= Promise.withResolvers<T>();
+
+                return reentry.promise;
+            }
+
+            entering = true;
+
+            let current: Promise<T>;
+
+            try {
+                // cleared asynchronously: a body that throws synchronously must not leave a settled pass behind
+                current = run(body).finally(() => {
+                    pass = undefined;
+                });
+            } finally {
+                entering = false;
+            }
+
+            pass = current;
+
+            if (reentry) {
+                const { resolve, reject } = reentry;
+
+                reentry = undefined;
+                current.then(resolve, reject);
+            }
+
+            return current;
         },
         /**
          * Runs `fn` as the measured part of a pass: runningSince while it runs, lastSuccessAt
