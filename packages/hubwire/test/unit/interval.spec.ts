@@ -8,6 +8,10 @@ import {
 import { FakeClock, drain } from '@hubwire/test';
 import { defineIntervalComponent } from '../../src';
 import type { IntervalResult } from '../../src';
+import { UnrefClock } from './fakes/unref-clock';
+
+// the timers that hold the event loop open (an unref'd one is not listed)
+const refTimers = () => process.getActiveResourcesInfo().filter((name) => name === 'Timeout').length;
 
 const START = Date.parse('2030-01-15T10:00:00.000Z');
 
@@ -21,7 +25,7 @@ function record(clock: FakeClock, results: IntervalResult[] = []) {
     return {
         passes,
         handler: () => {
-            passes.push(clock.now().getTime() - START);
+            passes.push(clock.now() - START);
 
             return results[index++];
         },
@@ -104,7 +108,7 @@ describe('src/component/interval', () => {
             intervalMs: 10_000,
             clock,
             handler: async () => {
-                passes.push(clock.now().getTime() - START);
+                passes.push(clock.now() - START);
                 await gate.promise;
             },
         });
@@ -235,7 +239,11 @@ describe('src/component/interval', () => {
         await drain();
         expect(passes).toEqual([1000]);
         expect(clock.timerCount).toBe(0);
-        expect(c.status()).toEqual({ lastSuccessAt: START + 1000, runningSince: undefined });
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 1000, 
+            lastRunAt: START + 1000, 
+            runningSince: undefined, 
+        });
         await c.settled();
         clock.advance(10_000);
         await drain();
@@ -373,6 +381,101 @@ describe('src/component/interval', () => {
         await drain();
         expect(passes).toBe(4);
         expect(c.status().lastSuccessAt).toBe(START + 4000);
+        await c.stop();
+    });
+
+    it('should set lastErrorAt and lastRunAt for a failed pass and leave lastSuccessAt', async () => {
+        const clock = new FakeClock(START);
+        let passes = 0;
+        const c = defineIntervalComponent({
+            intervalMs: 1000,
+            clock,
+            handler: () => {
+                passes++;
+
+                if (passes === 2) {
+                    throw new Error('x');
+                }
+            },
+        });
+
+        await c.start();
+        clock.advance(1000);
+        await drain();
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 1000, 
+            lastRunAt: START + 1000, 
+            runningSince: undefined, 
+        });
+        clock.advance(1000);
+        await drain();
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 1000,
+            lastErrorAt: START + 2000,
+            lastRunAt: START + 2000,
+            runningSince: undefined,
+        });
+        clock.advance(1000);
+        await drain();
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 3000,
+            lastErrorAt: START + 2000,
+            lastRunAt: START + 3000,
+            runningSince: undefined,
+        });
+        await c.stop();
+    });
+
+    it('should pass the component\'s name to onError', async () => {
+        const clock = new FakeClock(START);
+        const failure = new Error('x');
+        const seen: unknown[][] = [];
+        const define = (name?: string) => defineIntervalComponent({
+            name,
+            intervalMs: 1000,
+            runOnStart: true,
+            clock,
+            hooks: {
+                onError: (error, context) => {
+                    seen.push([error, context]);
+                },
+            },
+            handler: () => {
+                throw failure;
+            },
+        });
+        const named = define('purge');
+        const anonymous = define();
+
+        await named.start();
+        await anonymous.start();
+        await named.stop();
+        await anonymous.stop();
+        expect(seen).toEqual([[failure, { name: 'purge' }], [failure, { name: undefined }]]);
+    });
+
+    it('should record a failed pass when onError throws', async () => {
+        const clock = new FakeClock(START);
+        const c = defineIntervalComponent({
+            intervalMs: 1000,
+            runOnStart: true,
+            clock,
+            hooks: {
+                onError: () => {
+                    throw new Error('hook');
+                },
+            },
+            handler: () => {
+                throw new Error('x');
+            },
+        });
+
+        await expect(c.start()).resolves.toBeUndefined();
+        expect(c.status()).toEqual({
+            lastErrorAt: START, 
+            lastRunAt: START, 
+            runningSince: undefined, 
+        });
         await c.stop();
     });
 
@@ -525,7 +628,7 @@ describe('src/component/interval', () => {
                 runOnStart,
                 clock,
                 handler: async () => {
-                    passes.push(clock.now().getTime() - START);
+                    passes.push(clock.now() - START);
 
                     const gate = Promise.withResolvers<void>();
 
@@ -667,7 +770,7 @@ describe('src/component/interval', () => {
                 intervalMs: 1000,
                 clock,
                 handler: async () => {
-                    passes.push(clock.now().getTime() - START);
+                    passes.push(clock.now() - START);
 
                     if (passes.length === 1) {
                         await gate.promise;
@@ -706,7 +809,7 @@ describe('src/component/interval', () => {
                 runOnStart: true,
                 clock,
                 handler: async () => {
-                    passes.push(clock.now().getTime() - START);
+                    passes.push(clock.now() - START);
 
                     if (passes.length === 1) {
                         await gate.promise;
@@ -874,7 +977,11 @@ describe('src/component/interval', () => {
         await drain();
         expect(passes).toBe(1);
         expect(clock.timerCount).toBe(0);
-        expect(c.status()).toEqual({ lastSuccessAt: START + 1000, runningSince: undefined });
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 1000, 
+            lastRunAt: START + 1000, 
+            runningSince: undefined, 
+        });
     });
 
     it('should resolve settled() at once when no pass is running', async () => {
@@ -923,6 +1030,71 @@ describe('src/component/interval', () => {
         await c.stop();
     });
 
+    describe('unref', () => {
+        it('should unref every timer it arms, also the steps of a long wait', async () => {
+            const clock = new UnrefClock(START);
+            let passes = 0;
+            const c = defineIntervalComponent({
+                intervalMs: 1000,
+                unref: true,
+                clock,
+                handler: () => {
+                    passes++;
+
+                    return passes === 1 ? { delayMs: 2 ** 31 + 1000 } : undefined;
+                },
+            });
+
+            await c.start();
+            clock.advance(1000);
+            await drain();
+            clock.advance(2 ** 31 + 1000);
+            await drain();
+            clock.advance(1000);
+            await drain();
+            await c.stop();
+            expect(passes).toBe(3);
+            expect(clock.armedCount).toBeGreaterThan(3);
+            expect(clock.unrefCount).toBe(clock.armedCount);
+        });
+
+        it('should unref no timer by default', async () => {
+            const clock = new UnrefClock(START);
+            const c = defineIntervalComponent({
+                intervalMs: 1000,
+                clock,
+                handler: () => {},
+            });
+
+            await c.start();
+            clock.advance(3000);
+            await drain();
+            await c.stop();
+            expect(clock.armedCount).toBeGreaterThan(1);
+            expect(clock.unrefCount).toBe(0);
+        });
+
+        it('should not hold the event loop open on the system clock with unref', async () => {
+            const baseline = refTimers();
+            const held = defineIntervalComponent({ intervalMs: 60_000, handler: () => {} });
+            const unrefed = defineIntervalComponent({
+                intervalMs: 60_000,
+                unref: true,
+                handler: () => {},
+            });
+
+            try {
+                await unrefed.start();
+                expect(refTimers()).toBe(baseline);
+                await held.start();
+                expect(refTimers()).toBe(baseline + 1);
+            } finally {
+                await unrefed.stop();
+                await held.stop();
+            }
+        });
+    });
+
     it('should take status() times from the clock', async () => {
         const clock = new FakeClock(START);
         const gate = Promise.withResolvers<void>();
@@ -939,7 +1111,11 @@ describe('src/component/interval', () => {
         clock.advance(250);
         gate.resolve();
         await drain();
-        expect(c.status()).toEqual({ lastSuccessAt: START + 1250, runningSince: undefined });
+        expect(c.status()).toEqual({
+            lastSuccessAt: START + 1250, 
+            lastRunAt: START + 1250, 
+            runningSince: undefined, 
+        });
         await c.stop();
     });
 

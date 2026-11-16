@@ -58,6 +58,7 @@ health-check all of them in one loop.
   - [Handlers and replies](#handlers-and-replies)
   - [Initialization](#initialization)
   - [Lifecycle and status](#lifecycle-and-status)
+  - [Component groups](#component-groups)
 - [Scheduled components](#scheduled-components)
 - [Message bus](#message-bus)
   - [Routing](#routing)
@@ -152,14 +153,15 @@ Every component implements `IComponent`:
 interface IComponent {
     start(): Promise<void>;
     stop(): Promise<void>;
-    status(): ComponentStatus; // { lastSuccessAt?: number, runningSince?: number }
+    status(): ComponentStatus; // { lastSuccessAt?, lastErrorAt?, lastRunAt?, runningSince? }: epoch ms
     settled?(): Promise<void>; // resolves once no work started by the component runs
     handle?(key, data, metadata?, options?): Promise<void>;
 }
 ```
 
 `status()` reports top-level calls only (child events do not count): `runningSince` is set while
-a call is in flight, `lastSuccessAt` when the last one completed without throwing. `start()` and
+a call is in flight, `lastSuccessAt` when the last one completed without throwing, `lastErrorAt`
+when the last one threw, and `lastRunAt` when the last one ended either way. `start()` and
 `stop()` do nothing on a plain `Component`. Override them to acquire and release background work.
 
 `settled()` is optional, so components of every kind share one array. A shutdown stops them all,
@@ -170,6 +172,48 @@ const components: IComponent[] = [cleaner, worker];
 await Promise.all(components.map((component) => component.stop()));
 await Promise.all(components.map((component) => component.settled?.()));
 ```
+
+### Component groups
+
+`defineComponentGroup` holds named components and runs that sweep for you. A group is an
+`IComponent` itself, so a host needs one object, and groups nest:
+
+```typescript
+import { defineComponentGroup } from 'hubwire';
+
+const components = defineComponentGroup({
+    hooks: { onStopFailed: (name, error) => logger.warn(`${name} did not stop cleanly`, error) },
+});
+components.add('cleaner', cleaner);
+components.add('worker', worker);
+
+await components.start(); // in add order, one at a time
+await components.stop();  // stop() on all, then settled?.() on all; never rejects
+components.status();      // { components: [{ name: 'cleaner', lastSuccessAt, … }, { name: 'worker', … }] }
+```
+
+- `start()` starts the components in add order and awaits each. If one throws or rejects, the
+  group stops and settles the ones already started, then rejects with that error; it is not
+  started, and `start()` can be retried. A `start()` while started does nothing, one in flight is
+  joined.
+- `stop()` calls `stop()` on every component in reverse add order before it awaits any, then
+  awaits them, then calls `settled?.()` on all and awaits those. A `stop()` or `settled()` that
+  throws or rejects never keeps the others from stopping and settling: it goes to
+  `onStopFailed(name, error)`. A second `stop()` does nothing until the next `start()`; a `stop()`
+  during a `start()` stops the component being started at once (its `start()` may only resolve
+  once it is stopped, like a scheduled component's start pass), starts none after it, then waits
+  for the `start()` and stops them all. That component is stopped a second time once its
+  `start()` resolved, as its first `stop()` may have come before there was anything to stop: a
+  component's `stop()` must be safe to call twice. If its `start()` rejects instead, the group
+  still waits for that `stop()` and settles it.
+- A component must never await its group's `stop()` from its own `start()` or from a pass: the
+  group waits for both, so it would wait for itself. Call it without awaiting.
+- `settled()` resolves once every component's `settled?.()` resolved or failed; it never rejects.
+- `add()` throws on a duplicate name, and while the group is starting, started or stopping.
+- `status()` lists each component's own status under its name, in add order. The group sets no
+  `lastSuccessAt` / `runningSince` of its own: how to aggregate them is the host's decision.
+  `components` is an optional field of `ComponentStatus` that only a group sets, so the list is
+  typed through any `IComponent` (`component.status().components ?? []`), nested groups included.
 
 ## Scheduled components
 
@@ -182,12 +226,12 @@ const cleaner = defineScheduledComponent({
     schedule: '*/5 * * * *', // every five minutes
     run: ({ scheduledAt }) => sessions.deleteExpired(scheduledAt),
     hooks: {
-        onError: (error) => logger.warn('session cleanup failed', error),
+        onError: (error, { scheduledAt }) => logger.warn(`session cleanup of ${scheduledAt.toISOString()} failed`, error),
     },
 });
 
 await cleaner.start(); // one pass now, then one per tick
-cleaner.status();      // { lastSuccessAt, runningSince }
+cleaner.status();      // { lastSuccessAt, lastErrorAt, lastRunAt, runningSince }
 await cleaner.stop();
 await cleaner.settled(); // the pass in flight, if any, has finished
 ```
@@ -196,8 +240,12 @@ await cleaner.settled(); // the pass in flight, if any, has finished
   fires late (for the first pass, the time `start()` ran it), and an `AbortSignal` that `stop()`
   aborts while the pass runs.
 - `start()` runs a first pass before scheduling. Pass `runOnStart: false` to wait for the first tick.
-- Passes never overlap: a tick while a pass is still running is skipped.
-- A failing pass goes to `hooks.onError` and never rejects. The next tick simply runs again.
+- Passes never overlap: a tick that comes due while a pass is still running is dropped (not
+  queued) and reported to `hooks.onSkip` with reason `'running'`, so passes that overrun their
+  schedule show up. A dropped tick takes no lock.
+- A failing pass goes to `hooks.onError(error, { scheduledAt, name })` and never rejects. The next
+  tick simply runs again. `status()` tells failing passes apart: `lastErrorAt` and `lastRunAt` move,
+  `lastSuccessAt` stays.
 - `stop()` never waits for a pass in flight, so a pass may stop its own component. Stopped during
   the first pass, the component never schedules a tick. A pass must not *await* its component's
   `start()`, which would join the pass itself: restart with `void cleaner.start()`.
@@ -228,7 +276,7 @@ const report = defineScheduledComponent({
     lock,
     run: ({ scheduledAt }) => reports.send(scheduledAt),
     hooks: {
-        onSkip: (scheduledAt) => logger.debug('another replica runs this tick', scheduledAt),
+        onSkip: (scheduledAt, { reason }) => logger.debug(`tick ${scheduledAt.toISOString()} skipped: ${reason}`),
     },
 });
 ```
@@ -240,11 +288,12 @@ const report = defineScheduledComponent({
 - The key is never released: `lockTtlMs` (default 60 s) ends it. It must exceed the clock skew
   between replicas plus how late a replica can fire (a late timer still runs its tick, with the
   planned `scheduledAt`). A timer that fires `lockTtlMs` or more late (an event-loop stall, a
-  sleep) skips its tick and reports it to `hooks.onSkip`, since the key may already have expired.
+  sleep) skips its tick and reports it to `hooks.onSkip` (reason `'late'`), since the key may already have expired.
 - So a tick runs **at most once**: a replica that wins the key and then crashes, or whose pass
   fails, loses that tick for every replica. The next tick is independent.
-- `acquire()` rejecting skips the tick (fail closed) and goes to `hooks.onError`. A tick another
-  replica holds goes to `hooks.onSkip`.
+- `acquire()` rejecting skips the tick (fail closed) and goes to `hooks.onError` with the tick's
+  `scheduledAt`; no pass ran, so `status()` does not change. A tick another replica holds goes to
+  `hooks.onSkip` (reason `'locked'`).
 - `status().lastSuccessAt` counts only the passes this replica ran, so it stays empty on replicas
   that never win. Point a health check across replicas at `onSkip` as well.
 - With a lock, `runOnStart` defaults to `false`: the first pass is never locked (its `scheduledAt`
@@ -276,7 +325,7 @@ const purge = defineIntervalComponent({
     intervalMs: 60_000,
     handler: () => store.purgeExpired(),
     hooks: {
-        onError: (error) => logger.warn('purge failed', error),
+        onError: (error, { name }) => logger.warn(`${name} failed`, error),
     },
 });
 
@@ -313,8 +362,8 @@ const indexer = defineIntervalComponent({
   A `start()` that arrives while a pass is in flight means "keep running": if that pass returns
   `{ done: true }`, the loop begins again at once as a fresh `start()` would, so work queued
   during the final pass is not dropped. `stop()` clears that request.
-- A failing pass (a throw, a rejection, an invalid `delayMs`) goes to `hooks.onError`, leaves
-  `lastSuccessAt` as it was, and the loop waits `intervalMs`.
+- A failing pass (a throw, a rejection, an invalid `delayMs`) goes to `hooks.onError(error, { name })`,
+  sets `lastErrorAt` and `lastRunAt`, leaves `lastSuccessAt` as it was, and the loop waits `intervalMs`.
 - `stop()` aborts the signal of the pass in flight and arms nothing after it, whatever the pass
   returns; it does not wait for the pass, `settled()` does. A pass that throws because of the abort
   is reported to `hooks.onError` like any other failure.
@@ -332,15 +381,24 @@ Components read the time and arm their timers through an `IClock`:
 
 ```typescript
 interface IClock {
-    now(): Date;
-    setTimeout(fn: () => void, ms: number): { clear(): void };
+    now(): number; // epoch milliseconds, fractions allowed
+    setTimeout(fn: () => void, ms: number): ClockTimer; // { clear(): void, unref?(): void }
 }
 ```
 
-`systemClock` (`new Date()` and the global `setTimeout`, as they are) is the default. Pass `clock`
+`systemClock` (`Date.now()` and the global `setTimeout`, as they are) is the default. Pass `clock`
 to `defineScheduledComponent`, `defineIntervalComponent` or `new Component({ clock })` to drive a
-component from your own clock, e.g. `FakeClock` from `@hubwire/test` in a test. `status()` still
-reports epoch milliseconds, taken from `clock.now()`. The message bus keeps reading `Date.now()`.
+component from your own clock, e.g. `FakeClock` from `@hubwire/test` in a test, or a finer one
+(`now: () => performance.timeOrigin + performance.now()`). Such a clock is monotonic: it does not
+follow a corrected system time and stands still while the machine sleeps, so it drifts from the
+wall clock. Do not use it for a scheduled component with a `lock`: the slots, the lock keys and
+the late check would be measured on a clock the other replicas do not share. `status()` reports
+`clock.now()` as is; a `scheduledAt` taken from it drops the fraction. The message bus keeps reading `Date.now()`.
+
+A started scheduled or interval component keeps the process alive until `stop()`. Pass
+`unref: true` to either factory to `unref()` every timer it arms, so a CLI command or a one-off
+job can let the event loop drain. `systemClock`'s timers implement `unref()`; a clock whose timers
+lack it is used as is.
 
 ## Message bus
 
@@ -616,8 +674,8 @@ Behaviour that changed:
 - **Worker lifecycle races are handled.** `RemoteWorker` joins a concurrent `start()`, and a `stop()`
   during `start()` leaves no consumer behind, so application-side ordering of starts and teardown
   is no longer needed for that.
-- **Scheduled components** validate the cron expression when they are defined and destroy their
-  node-cron task on `stop()`.
+- **Scheduled components** validate the cron expression when they are defined and clear their
+  timer on `stop()`.
 
 ## Hooks
 
@@ -632,9 +690,10 @@ to your logger, metrics or tracing:
 | | `onExpired(message, routing)` | Its `metadata.expiresAt` had passed. It is acked without a handler |
 | | `onError(error, message, routing)` | A handler threw. The error is rethrown to the driver afterwards |
 | `RemoteWorker` | `onUnrouted(event)` | A forwarded event was dropped because no `publish` routing is set |
-| `defineScheduledComponent` | `onError(error)` | A pass failed, or the lock's `acquire()` rejected (the tick is skipped) |
-| | `onSkip(scheduledAt)` | Another replica holds this tick's lock, or the tick fired `lockTtlMs` or more late. The pass is skipped |
-| `defineIntervalComponent` | `onError(error)` | A pass threw, rejected or returned an invalid `delayMs`. The loop waits `intervalMs` |
+| `defineScheduledComponent` | `onError(error, { scheduledAt, name })` | A pass failed, or the lock's `acquire()` rejected (the tick is skipped) |
+| | `onSkip(scheduledAt, { scheduledAt, name, reason })` | A tick was skipped: `'locked'` (another replica holds its lock), `'late'` (it fired `lockTtlMs` or more late) or `'running'` (a pass was still running) |
+| `defineIntervalComponent` | `onError(error, { name })` | A pass threw, rejected or returned an invalid `delayMs`. The loop waits `intervalMs` |
+| `defineComponentGroup` | `onStopFailed(name, error)` | A component's `stop()` or `settled()` threw or rejected. The others are stopped and settled anyway |
 
 ```typescript
 const messageBus = new MessageBus({
@@ -657,9 +716,11 @@ turn an ack into a retry or reject a `publish()`. Your own extensions can follow
 | `Component` | class | `mount()`, `unmount()`, `handle()`, `initialize()`, `start()`, `stop()`, `status()` |
 | `defineScheduledComponent` | function | A cron job as an `IScheduledComponent` (an `IComponent` with `settled()`) |
 | `defineIntervalComponent` | function | A fixed-delay job as an `IScheduledComponent` |
+| `defineComponentGroup` | function | Named components started in order and stopped and settled as one, as an `IComponentGroup` |
+| `IComponentGroup`, `ComponentGroupOptions`, `ComponentGroupStatus`, `ComponentGroupHooks` | type | A group (an `IComponent` with `add()`), its options, status and hook |
 | `systemClock` | const | The default `IClock` |
-| `IClock`, `ComponentOptions` | type | The clock contract, and `Component`'s options (`clock`) |
-| `IComponent`, `ComponentStatus`, `ComponentEventMap`, `ComponentMetadata`, `ComponentHandler`, `ComponentHandlerFn`, `ComponentHandlerContext`, `ComponentHandleOptions` | type | The component contract and handler types |
+| `IClock`, `ClockTimer`, `ComponentOptions` | type | The clock contract, its timer handle, and `Component`'s options (`clock`) |
+| `IComponent`, `ComponentStatus`, `NamedComponentStatus`, `ComponentEventMap`, `ComponentMetadata`, `ComponentHandler`, `ComponentHandlerFn`, `ComponentHandlerContext`, `ComponentHandleOptions` | type | The component contract and handler types |
 | `ICallable`, `ForwardedEvent` | type | A component with a `handle()`, and one forwarded event |
 | `IScheduledComponent`, `ScheduledComponentOptions`, `ScheduledComponentRunContext` | type | A scheduled component, its options, and what `run` receives (`scheduledAt`, `signal`) |
 | `IScheduleLock` | type | Elects one replica per tick: `acquire(key, ttlMs)` |
@@ -675,6 +736,7 @@ turn an ack into a retry or reject a `publish()`. Your own extensions can follow
 | `assertMessageRouting` | function | Throws a `TypeError` for a routing no driver accepts (a `work` namespace with `/`); drivers call it in `publish()` / `consume()` |
 | `invokeHook` | function | Calls a hook and ignores a throw or rejection |
 | `MessageBusHooks`, `RemoteWorkerHooks`, `ScheduledComponentHooks`, `IntervalComponentHooks` | type | Hook types |
+| `ScheduledComponentHookContext`, `ScheduledComponentSkipContext`, `ScheduledComponentSkipReason`, `IntervalComponentHookContext` | type | What the scheduled and interval hooks receive besides the error or slot |
 
 ## Notes
 

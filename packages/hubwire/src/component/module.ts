@@ -42,6 +42,10 @@ export class Component<
 
     protected lastSuccessAt: number | undefined;
 
+    protected lastErrorAt: number | undefined;
+
+    protected lastRunAt: number | undefined;
+
     protected clock: IClock;
 
     constructor(options: ComponentOptions = {}) {
@@ -63,7 +67,12 @@ export class Component<
     }
 
     status(): ComponentStatus {
-        return { lastSuccessAt: this.lastSuccessAt, runningSince: this.runningSince };
+        return {
+            lastSuccessAt: this.lastSuccessAt,
+            lastErrorAt: this.lastErrorAt,
+            lastRunAt: this.lastRunAt,
+            runningSince: this.runningSince,
+        };
     }
 
     mount<K extends keyof EventMap & string>(
@@ -112,8 +121,9 @@ export class Component<
     }
 
     /**
-     * Handle a top-level event. Child events emitted through
-     * `context.handle` do not touch the status bookkeeping.
+     * Handle a top-level event: sets runningSince while it runs, then lastRunAt and
+     * lastSuccessAt or lastErrorAt. Child events emitted through `context.handle` do not
+     * touch the status bookkeeping.
      */
     handle<K extends keyof EventMap & string>(
         key: K,
@@ -129,11 +139,17 @@ export class Component<
         options: AnyHandleOptions = {},
     ): Promise<void> {
         this.running++;
-        this.runningSince ??= this.clock.now().getTime();
+        this.runningSince ??= this.clock.now();
 
         try {
             await this.dispatch(key, data, metadata, options);
-            this.lastSuccessAt = this.clock.now().getTime();
+            this.lastSuccessAt = this.clock.now();
+            this.lastRunAt = this.lastSuccessAt;
+        } catch (e) {
+            this.lastErrorAt = this.clock.now();
+            this.lastRunAt = this.lastErrorAt;
+
+            throw e;
         } finally {
             this.running--;
 

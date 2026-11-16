@@ -29,7 +29,7 @@ export class MemoryScheduleLock implements IScheduleLock {
         }
 
         // check and write without an await in between: two callers cannot both win
-        const now = this.clock.now().getTime();
+        const now = this.clock.now();
 
         for (const [held, expiresAt] of this.expiries) {
             if (expiresAt <= now) {

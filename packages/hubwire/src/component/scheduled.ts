@@ -1,8 +1,14 @@
 import { Cron } from 'croner';
 import { systemClock } from '../clock';
+import type { ClockTimer } from '../clock';
 import { invokeHook } from '../hook';
 import { createPassRunner } from './pass';
-import type { IScheduledComponent, ScheduledComponentOptions } from './types';
+import type {
+    IScheduledComponent,
+    ScheduledComponentHookContext,
+    ScheduledComponentOptions,
+    ScheduledComponentSkipReason,
+} from './types';
 
 // the longest a timer waits before the loop looks at the clock again: keeps a far slot
 // below setTimeout's 2^31-1 ms limit and re-evaluates a slot croner answered in the past
@@ -44,7 +50,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
         throw new Error(`Invalid cron expression: ${options.schedule}`);
     }
 
-    if (evaluator.nextRun(clock.now()) === null) {
+    if (evaluator.nextRun(new Date(clock.now())) === null) {
         // e.g. 31 February: the component would start and silently never run
         throw new Error(`Cron expression has no future run: ${options.schedule}`);
     }
@@ -66,12 +72,27 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
         } :
         undefined;
 
-    let timer: { clear(): void } | undefined;
+    let timer: ClockTimer | undefined;
+
+    // every timer goes through here, so `unref` covers the slot wait, its capped re-waits and the recheck
+    const setTimer = (fn: () => void, ms: number) => {
+        timer = clock.setTimeout(fn, ms);
+
+        if (options.unref) {
+            timer.unref?.();
+        }
+    };
     let scheduled = false;
     // generations: a start() whose first pass was overtaken by a start() or stop() must not schedule afterwards
-    const runner = createPassRunner<void>(clock, options.hooks);
+    const runner = createPassRunner<void, ScheduledComponentHookContext>(clock, options.hooks);
     // epoch ms of the last tick's slot (or of the moment scheduling began): the next slot lies after it
     let last = 0;
+
+    const context = (scheduledAt: Date): ScheduledComponentHookContext => ({ scheduledAt, name: options.name });
+
+    const skip = (scheduledAt: Date, reason: ScheduledComponentSkipReason) => {
+        invokeHook(options.hooks, 'onSkip', scheduledAt, { ...context(scheduledAt), reason });
+    };
 
     const run = async (scheduledAt: Date, locked: boolean, signal: AbortSignal) => {
         if (locked && lock) {
@@ -80,28 +101,30 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             try {
                 acquired = await lock.instance.acquire(`${lock.name}:${scheduledAt.toISOString()}`, lock.ttlMs);
             } catch (e) {
-                // fail closed: the next tick tries again
-                invokeHook(options.hooks, 'onError', e);
+                // fail closed: the next tick tries again; no pass ran, so the status stays
+                invokeHook(options.hooks, 'onError', e, context(scheduledAt));
 
                 return;
             }
 
             if (!acquired) {
-                invokeHook(options.hooks, 'onSkip', scheduledAt);
+                skip(scheduledAt, 'locked');
 
                 return;
             }
             // never released: the key is unique per tick, its TTL ends it
         }
 
-        await runner.measure(() => options.run({ scheduledAt, signal }));
+        await runner.measure(() => options.run({ scheduledAt, signal }), context(scheduledAt));
     };
 
     // the start pass is not locked: its scheduledAt differs per replica, a lock could not dedupe it
     const execute = (scheduledAt: Date, locked: boolean) => runner.execute((signal) => run(scheduledAt, locked, signal));
 
     function arm() {
-        const from = Math.max(clock.now().getTime(), last);
+        const from = Math.max(clock.now(), last);
+        // a Date drops the fraction of `from` (it floors): croner answers the first slot after
+        // that whole ms, which the comparison below holds against the exact `from`
         const next = evaluator.nextRun(new Date(from));
 
         if (!next) {
@@ -113,7 +136,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
 
         if (next.getTime() <= from) {
             // inside a repeated DST hour croner can answer with a past instant: look again later
-            timer = clock.setTimeout(arm, RECHECK_MS);
+            setTimer(arm, RECHECK_MS);
 
             return;
         }
@@ -122,8 +145,8 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
     }
 
     function wait(slot: number) {
-        timer = clock.setTimeout(() => {
-            if (clock.now().getTime() < slot) {
+        setTimer(() => {
+            if (clock.now() < slot) {
                 // a capped wait woke before the slot
                 wait(slot);
 
@@ -134,16 +157,23 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             // re-arm before the pass: a pass that stops its own component clears this timer
             arm();
 
-            if (lock && clock.now().getTime() - slot >= lock.ttlMs) {
+            if (lock && clock.now() - slot >= lock.ttlMs) {
                 // fired so late (a stall, a sleep) that the tick's key may have expired after
                 // another replica ran it: running it now could run it twice
-                invokeHook(options.hooks, 'onSkip', new Date(slot));
+                skip(new Date(slot), 'late');
+
+                return;
+            }
+
+            if (runner.inFlight()) {
+                // passes never overlap: the slot is dropped, not queued, and takes no lock
+                skip(new Date(slot), 'running');
 
                 return;
             }
 
             void execute(new Date(slot), true);
-        }, Math.min(slot - clock.now().getTime(), RECHECK_MS));
+        }, Math.min(slot - clock.now(), RECHECK_MS));
     }
 
     return {
@@ -155,7 +185,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             const current = runner.next();
 
             if (options.runOnStart ?? !lock) {
-                await execute(clock.now(), false);
+                await execute(new Date(clock.now()), false);
             }
 
             if (!runner.isCurrent(current)) {
@@ -163,7 +193,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             }
 
             scheduled = true;
-            last = clock.now().getTime();
+            last = clock.now();
             arm();
         },
         async stop() {

@@ -210,6 +210,55 @@ describe('src/component', () => {
         clock.advance(500);
         gate.resolve();
         await handled;
-        expect(component.status()).toEqual({ lastSuccessAt: Date.parse('2030-01-15T10:00:00.500Z'), runningSince: undefined });
+        expect(component.status()).toEqual({
+            lastSuccessAt: Date.parse('2030-01-15T10:00:00.500Z'),
+            lastRunAt: Date.parse('2030-01-15T10:00:00.500Z'),
+            runningSince: undefined,
+        });
+    });
+
+    it('should set lastErrorAt and lastRunAt for a failed top-level call and leave lastSuccessAt', async () => {
+        const clock = new FakeClock(new Date('2030-01-15T10:00:00.000Z'));
+        const component = new Component<{ run: Ev, fail: Ev }>({ clock });
+
+        component.mount('run', () => {});
+        component.mount('fail', () => {
+            throw new Error('x');
+        });
+
+        await component.handle('run', {});
+        clock.advance(1000);
+        await expect(component.handle('fail', {})).rejects.toThrow('x');
+        expect(component.status()).toEqual({
+            lastSuccessAt: Date.parse('2030-01-15T10:00:00.000Z'),
+            lastErrorAt: Date.parse('2030-01-15T10:00:01.000Z'),
+            lastRunAt: Date.parse('2030-01-15T10:00:01.000Z'),
+            runningSince: undefined,
+        });
+
+        clock.advance(1000);
+        await component.handle('run', {});
+        expect(component.status()).toEqual({
+            lastSuccessAt: Date.parse('2030-01-15T10:00:02.000Z'),
+            lastErrorAt: Date.parse('2030-01-15T10:00:01.000Z'),
+            lastRunAt: Date.parse('2030-01-15T10:00:02.000Z'),
+            runningSince: undefined,
+        });
+    });
+
+    it('should not stamp a failed child event as a failed call', async () => {
+        const clock = new FakeClock(new Date('2030-01-15T10:00:00.000Z'));
+        const component = new Component<{ run: Ev, child: Ev }>({ clock });
+
+        component.mount('child', () => {
+            throw new Error('child');
+        });
+        component.mount('run', async (_data, context) => {
+            await context.handle('child', {}).catch(() => undefined);
+        });
+
+        await component.handle('run', {});
+        expect(component.status().lastErrorAt).toBeUndefined();
+        expect(component.status().lastSuccessAt).toBe(Date.parse('2030-01-15T10:00:00.000Z'));
     });
 });

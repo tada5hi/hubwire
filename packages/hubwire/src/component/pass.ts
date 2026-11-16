@@ -1,6 +1,6 @@
 import type { IClock } from '../clock';
 import { invokeHook } from '../hook';
-import type { ComponentStatus, ScheduledComponentHooks } from './types';
+import type { ComponentStatus } from './types';
 
 /**
  * Internal (not exported): what the scheduled and the interval component share.
@@ -8,9 +8,11 @@ import type { ComponentStatus, ScheduledComponentHooks } from './types';
  * the status bookkeeping and settled(), plus a generation counter that start() and
  * stop() bump, so a loop that was stopped or restarted meanwhile arms nothing.
  */
-export function createPassRunner<T>(clock: IClock, hooks: Pick<ScheduledComponentHooks, 'onError'> | undefined) {
+export function createPassRunner<T, C>(clock: IClock, hooks: { onError?(error: unknown, context: C): void } | undefined) {
     let generation = 0;
     let lastSuccessAt: number | undefined;
+    let lastErrorAt: number | undefined;
+    let lastRunAt: number | undefined;
     let runningSince: number | undefined;
     // the pass in flight: a pass requested during it (a second start(), or one after a stop())
     // joins it instead of running a second pass next to it
@@ -95,20 +97,24 @@ export function createPassRunner<T>(clock: IClock, hooks: Pick<ScheduledComponen
             return current;
         },
         /**
-         * Runs `fn` as the measured part of a pass: runningSince while it runs, lastSuccessAt
-         * when it resolves; a failure goes to hooks.onError and resolves `undefined`.
+         * Runs `fn` as the measured part of a pass: runningSince while it runs, lastRunAt and
+         * lastSuccessAt when it resolves; a failure sets lastRunAt and lastErrorAt, goes to
+         * hooks.onError with `context` and resolves `undefined`.
          */
-        async measure<R>(fn: () => Promise<R> | R): Promise<{ value: R } | undefined> {
-            runningSince = clock.now().getTime();
+        async measure<R>(fn: () => Promise<R> | R, context: C): Promise<{ value: R } | undefined> {
+            runningSince = clock.now();
 
             try {
                 const value = await fn();
 
-                lastSuccessAt = clock.now().getTime();
+                lastSuccessAt = clock.now();
+                lastRunAt = lastSuccessAt;
 
                 return { value };
             } catch (e) {
-                invokeHook(hooks, 'onError', e);
+                lastErrorAt = clock.now();
+                lastRunAt = lastErrorAt;
+                invokeHook(hooks, 'onError', e, context);
 
                 return undefined;
             } finally {
@@ -126,7 +132,12 @@ export function createPassRunner<T>(clock: IClock, hooks: Pick<ScheduledComponen
             await pass;
         },
         status(): ComponentStatus {
-            return { lastSuccessAt, runningSince };
+            return {
+                lastSuccessAt,
+                lastErrorAt,
+                lastRunAt,
+                runningSince,
+            };
         },
     };
 }

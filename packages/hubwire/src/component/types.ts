@@ -18,13 +18,33 @@ export type ComponentOptions = {
 
 export type ComponentStatus = {
     /**
-     * Epoch ms of the last pass / handled call that completed without error.
+     * Epoch ms the last pass / handled call that completed without error ended.
      */
     lastSuccessAt?: number,
+    /**
+     * Epoch ms the last pass / handled call that failed ended.
+     */
+    lastErrorAt?: number,
+    /**
+     * Epoch ms the last pass / handled call ended, however it ended.
+     */
+    lastRunAt?: number,
     /**
      * Epoch ms the pass / call in flight started at.
      */
     runningSince?: number,
+    /**
+     * Only a component group sets it: the status of each of its components under the
+     * name it was added with, in add order. A nested group's entry carries its own.
+     */
+    components?: NamedComponentStatus[],
+};
+
+/**
+ * A component's status inside a group's `components`.
+ */
+export type NamedComponentStatus = ComponentStatus & {
+    name: string,
 };
 
 export type ComponentHandlerContext<
@@ -94,25 +114,49 @@ export type ForwardedEvent<EventMap extends ComponentEventMap = ComponentEventMa
 }[keyof EventMap & string];
 
 /**
+ * Which pass of which scheduled component a hook reports.
+ */
+export type ScheduledComponentHookContext = {
+    /**
+     * The tick's planned fire time; for the start pass, the time start() ran it.
+     */
+    scheduledAt: Date,
+    /**
+     * The component's `name` option.
+     */
+    name?: string,
+};
+
+/**
+ * Why a tick did not run: another replica holds its lock (`locked`), its timer
+ * fired lockTtlMs or more late (`late`), or a pass was still running (`running`).
+ */
+export type ScheduledComponentSkipReason = 'locked' | 'late' | 'running';
+
+export type ScheduledComponentSkipContext = ScheduledComponentHookContext & {
+    reason: ScheduledComponentSkipReason,
+};
+
+/**
  * Observers; a hook that throws is ignored (see invokeHook).
  */
 export type ScheduledComponentHooks = {
     /**
-     * A pass failed, or the lock's acquire() rejected (the tick is skipped).
+     * A pass failed, or the lock's acquire() rejected (the tick is skipped, the status unchanged).
      * start() still resolves; the next tick runs again.
      */
-    onError?(error: unknown): void,
+    onError?(error: unknown, context: ScheduledComponentHookContext): void,
     /**
-     * Another replica holds this tick's lock, or the tick fired lockTtlMs or more
-     * late (after its key may have expired): the pass was skipped.
+     * A tick was skipped; `context.reason` says why.
      */
-    onSkip?(scheduledAt: Date): void,
+    onSkip?(scheduledAt: Date, context: ScheduledComponentSkipContext): void,
 };
 
 /**
- * A component that can be drained: an IComponent whose settled is not optional.
+ * A component that can be drained: an IComponent whose settled is not optional. It handles
+ * no events and has no `handle`, so it fits an IComponent of any event map.
  */
-export interface IScheduledComponent extends IComponent {
+export interface IScheduledComponent extends Omit<IComponent, 'handle'> {
     /**
      * Resolves once no pass is running (at once when none is). stop() does not
      * wait for a pass in flight; a shutdown awaits settled() after stop().
@@ -172,6 +216,11 @@ type ScheduledComponentBaseOptions = {
      * Time and timers of the schedule and of status(). Default: systemClock
      */
     clock?: IClock,
+    /**
+     * unref() every timer the component arms, so a started component does not keep
+     * the process alive. Default: false
+     */
+    unref?: boolean,
 };
 
 export type ScheduledComponentOptions = ScheduledComponentBaseOptions & (
@@ -198,7 +247,25 @@ export type ScheduledComponentOptions = ScheduledComponentBaseOptions & (
     }
 );
 
-export type IntervalComponentHooks = Pick<ScheduledComponentHooks, 'onError'>;
+/**
+ * Which interval component a hook reports.
+ */
+export type IntervalComponentHookContext = {
+    /**
+     * The component's `name` option.
+     */
+    name?: string,
+};
+
+/**
+ * Observers; a hook that throws is ignored (see invokeHook).
+ */
+export type IntervalComponentHooks = {
+    /**
+     * A pass threw, rejected or returned an invalid delayMs. The loop waits intervalMs.
+     */
+    onError?(error: unknown, context: IntervalComponentHookContext): void,
+};
 
 export type IntervalComponentHandlerContext = {
     /**
@@ -227,7 +294,7 @@ export type IntervalComponentOptions = {
      */
     handler: (context: IntervalComponentHandlerContext) => Promise<IntervalResult> | IntervalResult,
     /**
-     * Names the component for its owner (logs, status pages); hubwire does not use it.
+     * Names the component for its owner (logs, status pages); passed to the hooks.
      */
     name?: string,
     /**
@@ -239,4 +306,9 @@ export type IntervalComponentOptions = {
      * Time and timers of the loop and of status(). Default: systemClock
      */
     clock?: IClock,
+    /**
+     * unref() every timer the component arms, so a started component does not keep
+     * the process alive. Default: false
+     */
+    unref?: boolean,
 };

@@ -1,6 +1,12 @@
 import { systemClock } from '../clock';
+import type { ClockTimer } from '../clock';
 import { createPassRunner } from './pass';
-import type { IScheduledComponent, IntervalComponentOptions, IntervalResult } from './types';
+import type {
+    IScheduledComponent,
+    IntervalComponentHookContext,
+    IntervalComponentOptions,
+    IntervalResult,
+} from './types';
 
 // setTimeout's limit: a longer wait is armed in steps of at most this
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -28,9 +34,10 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
     }
 
     const clock = options.clock ?? systemClock;
-    const runner = createPassRunner<Decision>(clock, options.hooks);
+    const runner = createPassRunner<Decision, IntervalComponentHookContext>(clock, options.hooks);
+    const context: IntervalComponentHookContext = { name: options.name };
 
-    let timer: { clear(): void } | undefined;
+    let timer: ClockTimer | undefined;
     let looping = false;
     // a start() arrived while a pass was in flight: a `{ done: true }` of that pass must not end the loop
     let requested = false;
@@ -56,7 +63,7 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
     };
 
     const execute = () => runner.execute(async (signal) => {
-        const outcome = await runner.measure(async () => decide(await options.handler({ signal })));
+        const outcome = await runner.measure(async () => decide(await options.handler({ signal })), context);
 
         // a failed pass (also an invalid delayMs) waits the interval
         return outcome ? outcome.value : { done: false, delayMs: intervalMs };
@@ -91,14 +98,14 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
         }
 
         looping = true;
-        wait(current, clock.now().getTime() + decision.delayMs);
+        wait(current, clock.now() + decision.delayMs);
     };
 
     function wait(current: number, until: number) {
         timer = clock.setTimeout(() => {
             timer = undefined;
 
-            const now = clock.now().getTime();
+            const now = clock.now();
 
             if (now < until) {
                 // a capped wait woke before the end of the delay
@@ -108,7 +115,11 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
             }
 
             void execute().then((decision) => follow(current, decision));
-        }, Math.min(until - clock.now().getTime(), MAX_TIMER_MS));
+        }, Math.min(until - clock.now(), MAX_TIMER_MS));
+
+        if (options.unref) {
+            timer.unref?.();
+        }
     }
 
     async function begin() {
