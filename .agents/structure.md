@@ -19,7 +19,7 @@ hubwire/
 │   │   │   └── message-bus/             # IMessageBus, MessageBus, IMessageBusDriver, MemoryMessageBusDriver, message helpers
 │   │   ├── test/
 │   │   │   ├── unit/*.spec.ts           # One spec per module
-│   │   │   ├── unit/fakes/              # TestComponent (FakeMessageBus, drain() come from @hubwire/test)
+│   │   │   ├── unit/fakes/              # TestComponent, UnrefClock (FakeMessageBus, drain() come from @hubwire/test)
 │   │   │   └── vitest.config.ts         # aliases `hubwire` and `@hubwire/test` to source
 │   │   ├── package.json                 # nx.implicitDependencies: ["!@hubwire/test"] (cuts the inferred cycle)
 │   │   ├── README.md, LICENSE
@@ -76,7 +76,7 @@ hubwire/
 | Module | Purpose |
 |---|---|
 | `hubwire/src/component/types.ts` | `IComponent` (`start` / `stop` / `status`, optional `handle` and `settled`), `ICallable` (`handle` required), `IScheduledComponent` (`settled` required), `ScheduledComponentOptions` (a union: `lock` requires `name`), `ScheduledComponentRunContext` (`scheduledAt`), `IScheduleLock` (`acquire(key, ttlMs)`, never released), `ScheduledComponentHooks` (`onError`, `onSkip`) |
-| `hubwire/src/clock/` | `IClock` (`now(): number`, epoch ms, fractions allowed; `setTimeout(fn, ms): { clear() }`), `systemClock` (`Date.now()`, the global timers, not unref'd). Every timestamp and timer of `src/component/` goes through the `clock` option (default `systemClock`); a `Date` is built only for croner, `scheduledAt` and the lock key (it floors a fraction). `src/message-bus/` reads `Date.now()` |
+| `hubwire/src/clock/` | `IClock` (`now(): number`, epoch ms, fractions allowed; `setTimeout(fn, ms): ClockTimer` = `{ clear(), unref?() }`), `systemClock` (`Date.now()`, the global timers, not unref'd; its handle's `unref()` unrefs the Node timer). `unref: true` on the scheduled / interval factory calls `unref?.()` on every timer it arms. Every timestamp and timer of `src/component/` goes through the `clock` option (default `systemClock`); a `Date` is built only for croner, `scheduledAt` and the lock key (it floors a fraction). `src/message-bus/` reads `Date.now()` |
 | `hubwire/src/component/pass.ts` | Internal (not exported): `createPassRunner`, shared by the scheduled and the interval component: one pass at a time (a pass requested during another joins it and gets its result, also one requested synchronously from the body before its first await), a fresh `AbortSignal` per pass that `abort()` (their `stop()`) aborts, `runningSince` / `lastSuccessAt` / `onError` around the measured part, `settled()`, the generation counter |
 | `hubwire/src/component/interval.ts` | `defineIntervalComponent`: `intervalMs` validated at definition (positive finite), fixed delay from the end of a pass (waits above 2^31-1 ms armed in steps), no pass at start unless `runOnStart`; the handler's result: nothing → `intervalMs`, `{ delayMs }` once (invalid → a failed pass), `{ done: true }` (wins) → the state after `stop()`, unless a `start()` arrived during that pass, which begins the loop again as a fresh `start()` (`stop()` clears the request); a failed pass → `onError`, then `intervalMs`; `stop()` aborts the signal and arms nothing after the pass; no lock |
 | `hubwire/src/component/module.ts` | `Component`: key → handler map, `'*'` fallback, per-handler memoized `initialize()`, child events via `context.handle`, unhandled → `options.handle`, status of top-level calls |

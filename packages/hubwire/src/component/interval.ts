@@ -1,4 +1,5 @@
 import { systemClock } from '../clock';
+import type { ClockTimer } from '../clock';
 import { createPassRunner } from './pass';
 import type { IScheduledComponent, IntervalComponentOptions, IntervalResult } from './types';
 
@@ -30,7 +31,7 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
     const clock = options.clock ?? systemClock;
     const runner = createPassRunner<Decision>(clock, options.hooks);
 
-    let timer: { clear(): void } | undefined;
+    let timer: ClockTimer | undefined;
     let looping = false;
     // a start() arrived while a pass was in flight: a `{ done: true }` of that pass must not end the loop
     let requested = false;
@@ -109,6 +110,10 @@ export function defineIntervalComponent(options: IntervalComponentOptions): ISch
 
             void execute().then((decision) => follow(current, decision));
         }, Math.min(until - clock.now(), MAX_TIMER_MS));
+
+        if (options.unref) {
+            timer.unref?.();
+        }
     }
 
     async function begin() {

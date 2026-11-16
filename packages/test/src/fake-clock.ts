@@ -1,4 +1,4 @@
-import type { IClock } from 'hubwire';
+import type { ClockTimer, IClock } from 'hubwire';
 
 type FakeTimer = {
     at: number,
@@ -35,7 +35,7 @@ export class FakeClock implements IClock {
         return this.time;
     }
 
-    setTimeout(fn: () => void, ms: number): { clear(): void } {
+    setTimeout(fn: () => void, ms: number): ClockTimer {
         const delay = ms >= 1 && ms <= 2 ** 31 - 1 ? ms : 1;
         const timer: FakeTimer = {
             at: this.time + delay, 

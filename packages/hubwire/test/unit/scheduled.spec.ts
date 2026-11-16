@@ -7,10 +7,14 @@ import {
 } from 'vitest';
 import { FakeClock, MemoryScheduleLock, drain } from '@hubwire/test';
 import { defineScheduledComponent, systemClock } from '../../src';
+import { UnrefClock } from './fakes/unref-clock';
 
 const wait = (ms: number) => new Promise((resolve) => {
     setTimeout(resolve, ms);
 });
+
+// the timers that hold the event loop open (an unref'd one is not listed)
+const refTimers = () => process.getActiveResourcesInfo().filter((name) => name === 'Timeout').length;
 
 describe('src/component/scheduled', () => {
     it('should never reject start() when the first pass fails, and report it to onError', async () => {
@@ -938,6 +942,110 @@ describe('src/component/scheduled', () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+
+    describe('unref', () => {
+        it('should unref every timer it arms: slot waits, capped re-waits and the next slot', async () => {
+            const clock = new UnrefClock(Date.parse('2030-01-15T10:00:00.000Z'));
+            const seen: string[] = [];
+            const c = defineScheduledComponent({
+                schedule: '0 2 10 * * *', // 10:02:00, two minutes away: several capped waits
+                timezone: 'UTC',
+                runOnStart: false,
+                unref: true,
+                clock,
+                run: async ({ scheduledAt }) => {
+                    seen.push(scheduledAt.toISOString());
+                },
+            });
+
+            await c.start();
+            clock.advance(120_000);
+            await drain();
+            await c.stop();
+            expect(seen).toEqual(['2030-01-15T10:02:00.000Z']);
+            expect(clock.armedCount).toBeGreaterThan(4);
+            expect(clock.unrefCount).toBe(clock.armedCount);
+        });
+
+        it('should unref the recheck timer of a repeated hour', async () => {
+            // 01:10 EST, the second occurrence of 01:xx: croner answers with a past instant here
+            const clock = new UnrefClock(Date.parse('2026-11-01T06:10:00.500Z'));
+            const seen: string[] = [];
+            const c = defineScheduledComponent({
+                schedule: '*/15 * * * *',
+                timezone: 'America/New_York',
+                runOnStart: false,
+                unref: true,
+                clock,
+                run: async ({ scheduledAt }) => {
+                    seen.push(scheduledAt.toISOString());
+                },
+            });
+
+            await c.start();
+            clock.advance(55 * 60 * 1000);
+            await drain();
+            await c.stop();
+            expect(seen).toEqual(['2026-11-01T07:00:00.000Z']);
+            expect(clock.armedCount).toBeGreaterThan(1);
+            expect(clock.unrefCount).toBe(clock.armedCount);
+        });
+
+        it('should unref no timer by default', async () => {
+            const clock = new UnrefClock(Date.parse('2030-01-15T10:00:00.000Z'));
+            const c = defineScheduledComponent({
+                schedule: '0 2 10 * * *',
+                timezone: 'UTC',
+                clock,
+                run: async () => {},
+            });
+
+            await c.start();
+            clock.advance(120_000);
+            await drain();
+            await c.stop();
+            expect(clock.armedCount).toBeGreaterThan(4);
+            expect(clock.unrefCount).toBe(0);
+        });
+
+        it('should unref a timer of the system clock', () => {
+            const baseline = refTimers();
+            const timer = systemClock.setTimeout(() => {}, 60_000);
+
+            try {
+                expect(refTimers()).toBe(baseline + 1);
+                timer.unref?.();
+                expect(refTimers()).toBe(baseline);
+            } finally {
+                timer.clear();
+            }
+        });
+
+        it('should not hold the event loop open on the system clock with unref', async () => {
+            const baseline = refTimers();
+            const held = defineScheduledComponent({
+                schedule: '0 0 1 1 *', 
+                runOnStart: false, 
+                run: async () => {}, 
+            });
+            const unrefed = defineScheduledComponent({
+                schedule: '0 0 1 1 *',
+                runOnStart: false,
+                unref: true,
+                run: async () => {},
+            });
+
+            try {
+                await unrefed.start();
+                expect(refTimers()).toBe(baseline);
+                await held.start();
+                expect(refTimers()).toBe(baseline + 1);
+            } finally {
+                await unrefed.stop();
+                await held.stop();
+            }
+        });
     });
 
     it('should reject an invalid timezone at definition, before any pass', () => {

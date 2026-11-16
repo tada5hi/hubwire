@@ -8,6 +8,10 @@ import {
 import { FakeClock, drain } from '@hubwire/test';
 import { defineIntervalComponent } from '../../src';
 import type { IntervalResult } from '../../src';
+import { UnrefClock } from './fakes/unref-clock';
+
+// the timers that hold the event loop open (an unref'd one is not listed)
+const refTimers = () => process.getActiveResourcesInfo().filter((name) => name === 'Timeout').length;
 
 const START = Date.parse('2030-01-15T10:00:00.000Z');
 
@@ -921,6 +925,71 @@ describe('src/component/interval', () => {
         await drain();
         expect(passes).toEqual([intervalMs]);
         await c.stop();
+    });
+
+    describe('unref', () => {
+        it('should unref every timer it arms, also the steps of a long wait', async () => {
+            const clock = new UnrefClock(START);
+            let passes = 0;
+            const c = defineIntervalComponent({
+                intervalMs: 1000,
+                unref: true,
+                clock,
+                handler: () => {
+                    passes++;
+
+                    return passes === 1 ? { delayMs: 2 ** 31 + 1000 } : undefined;
+                },
+            });
+
+            await c.start();
+            clock.advance(1000);
+            await drain();
+            clock.advance(2 ** 31 + 1000);
+            await drain();
+            clock.advance(1000);
+            await drain();
+            await c.stop();
+            expect(passes).toBe(3);
+            expect(clock.armedCount).toBeGreaterThan(3);
+            expect(clock.unrefCount).toBe(clock.armedCount);
+        });
+
+        it('should unref no timer by default', async () => {
+            const clock = new UnrefClock(START);
+            const c = defineIntervalComponent({
+                intervalMs: 1000,
+                clock,
+                handler: () => {},
+            });
+
+            await c.start();
+            clock.advance(3000);
+            await drain();
+            await c.stop();
+            expect(clock.armedCount).toBeGreaterThan(1);
+            expect(clock.unrefCount).toBe(0);
+        });
+
+        it('should not hold the event loop open on the system clock with unref', async () => {
+            const baseline = refTimers();
+            const held = defineIntervalComponent({ intervalMs: 60_000, handler: () => {} });
+            const unrefed = defineIntervalComponent({
+                intervalMs: 60_000,
+                unref: true,
+                handler: () => {},
+            });
+
+            try {
+                await unrefed.start();
+                expect(refTimers()).toBe(baseline);
+                await held.start();
+                expect(refTimers()).toBe(baseline + 1);
+            } finally {
+                await unrefed.stop();
+                await held.stop();
+            }
+        });
     });
 
     it('should take status() times from the clock', async () => {

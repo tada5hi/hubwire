@@ -172,6 +172,11 @@ type ScheduledComponentBaseOptions = {
      * Time and timers of the schedule and of status(). Default: systemClock
      */
     clock?: IClock,
+    /**
+     * unref() every timer the component arms, so a started component does not keep
+     * the process alive. Default: false
+     */
+    unref?: boolean,
 };
 
 export type ScheduledComponentOptions = ScheduledComponentBaseOptions & (
@@ -239,4 +244,9 @@ export type IntervalComponentOptions = {
      * Time and timers of the loop and of status(). Default: systemClock
      */
     clock?: IClock,
+    /**
+     * unref() every timer the component arms, so a started component does not keep
+     * the process alive. Default: false
+     */
+    unref?: boolean,
 };

@@ -1,5 +1,6 @@
 import { Cron } from 'croner';
 import { systemClock } from '../clock';
+import type { ClockTimer } from '../clock';
 import { invokeHook } from '../hook';
 import { createPassRunner } from './pass';
 import type { IScheduledComponent, ScheduledComponentOptions } from './types';
@@ -66,7 +67,16 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
         } :
         undefined;
 
-    let timer: { clear(): void } | undefined;
+    let timer: ClockTimer | undefined;
+
+    // every timer goes through here, so `unref` covers the slot wait, its capped re-waits and the recheck
+    const setTimer = (fn: () => void, ms: number) => {
+        timer = clock.setTimeout(fn, ms);
+
+        if (options.unref) {
+            timer.unref?.();
+        }
+    };
     let scheduled = false;
     // generations: a start() whose first pass was overtaken by a start() or stop() must not schedule afterwards
     const runner = createPassRunner<void>(clock, options.hooks);
@@ -115,7 +125,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
 
         if (next.getTime() <= from) {
             // inside a repeated DST hour croner can answer with a past instant: look again later
-            timer = clock.setTimeout(arm, RECHECK_MS);
+            setTimer(arm, RECHECK_MS);
 
             return;
         }
@@ -124,7 +134,7 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
     }
 
     function wait(slot: number) {
-        timer = clock.setTimeout(() => {
+        setTimer(() => {
             if (clock.now() < slot) {
                 // a capped wait woke before the slot
                 wait(slot);

@@ -42,7 +42,7 @@ are imported by name (aliased to source).
   the memory driver delivers on microtasks).
 
 - **Fakes, never `vi.fn()` / `vi.mock()`.** Package-private fakes live in `test/unit/fakes/`
-  (`TestComponent`, `FakeAmqpClient`); shared ones are published by `@hubwire/test`
+  (`TestComponent`, `UnrefClock`, `FakeAmqpClient`); shared ones are published by `@hubwire/test`
   (`FakeMessageBus` implementing `IMessageBus`, `drain`). The memory
   driver is the bus in most dispatcher and worker specs. Hooks are asserted with plain objects whose hook
   functions push into an array.
@@ -57,7 +57,8 @@ are imported by name (aliased to source).
 - `interval.spec.ts` and the `clock` cases of `scheduled.spec.ts` drive a `FakeClock` (`clock.advance(ms)`,
   then `drain()` so the pass a timer started settles). A "no global timer" case fakes only
   `setTimeout`/`clearTimeout` (`vi.useFakeTimers({ toFake: [...] })`): without fake timers
-  `vi.getTimerCount()` is always 0.
+  `vi.getTimerCount()` is always 0. An `unref` case on the system clock counts `'Timeout'` in
+  `process.getActiveResourcesInfo()`, which lists only ref'd timers.
 - `driver.spec.ts` (@hubwire/amqp) runs against `FakeAmqpClient` (no broker) and compares every routing
   shape with `fixtures/hub-wire.ts`, captured from hub's former driver. The only allowed
   difference is the retry counter (body `metadata.attempt` → `x-attempt` header, reported to the

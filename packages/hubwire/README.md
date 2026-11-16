@@ -333,7 +333,7 @@ Components read the time and arm their timers through an `IClock`:
 ```typescript
 interface IClock {
     now(): number; // epoch milliseconds, fractions allowed
-    setTimeout(fn: () => void, ms: number): { clear(): void };
+    setTimeout(fn: () => void, ms: number): ClockTimer; // { clear(): void, unref?(): void }
 }
 ```
 
@@ -342,6 +342,11 @@ to `defineScheduledComponent`, `defineIntervalComponent` or `new Component({ clo
 component from your own clock, e.g. `FakeClock` from `@hubwire/test` in a test, or a monotonic one
 (`now: () => performance.timeOrigin + performance.now()`). `status()` reports `clock.now()` as is;
 a `scheduledAt` taken from it drops the fraction. The message bus keeps reading `Date.now()`.
+
+A started scheduled or interval component keeps the process alive until `stop()`. Pass
+`unref: true` to either factory to `unref()` every timer it arms, so a CLI command or a one-off
+job can let the event loop drain. `systemClock`'s timers implement `unref()`; a clock whose timers
+lack it is used as is.
 
 ## Message bus
 
@@ -659,7 +664,7 @@ turn an ack into a retry or reject a `publish()`. Your own extensions can follow
 | `defineScheduledComponent` | function | A cron job as an `IScheduledComponent` (an `IComponent` with `settled()`) |
 | `defineIntervalComponent` | function | A fixed-delay job as an `IScheduledComponent` |
 | `systemClock` | const | The default `IClock` |
-| `IClock`, `ComponentOptions` | type | The clock contract, and `Component`'s options (`clock`) |
+| `IClock`, `ClockTimer`, `ComponentOptions` | type | The clock contract, its timer handle, and `Component`'s options (`clock`) |
 | `IComponent`, `ComponentStatus`, `ComponentEventMap`, `ComponentMetadata`, `ComponentHandler`, `ComponentHandlerFn`, `ComponentHandlerContext`, `ComponentHandleOptions` | type | The component contract and handler types |
 | `ICallable`, `ForwardedEvent` | type | A component with a `handle()`, and one forwarded event |
 | `IScheduledComponent`, `ScheduledComponentOptions`, `ScheduledComponentRunContext` | type | A scheduled component, its options, and what `run` receives (`scheduledAt`, `signal`) |
