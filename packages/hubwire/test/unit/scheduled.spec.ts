@@ -815,6 +815,27 @@ describe('src/component/scheduled', () => {
             await c.stop();
             expect(seen).toEqual(['2030-01-16T00:00:00.000Z']);
         });
+
+        it('should hand the pass a signal that stop() aborts', async () => {
+            const clock = new FakeClock();
+            const gate = Promise.withResolvers<void>();
+            const signals: AbortSignal[] = [];
+            const c = defineScheduledComponent({
+                schedule: '0 0 1 1 *',
+                clock,
+                run: async ({ signal }) => {
+                    signals.push(signal);
+                    await gate.promise;
+                },
+            });
+            const started = c.start();
+
+            expect(signals[0]?.aborted).toBe(false);
+            await c.stop();
+            expect(signals[0]?.aborted).toBe(true);
+            gate.resolve();
+            await started;
+        });
     });
 
     it('should export a system clock over the global timers', async () => {

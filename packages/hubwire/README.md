@@ -192,8 +192,9 @@ await cleaner.stop();
 await cleaner.settled(); // the pass in flight, if any, has finished
 ```
 
-- `run` receives `{ scheduledAt }`: the tick's planned time (ms 0), also when its timer fires
-  late; for the first pass, the time `start()` ran it.
+- `run` receives `{ scheduledAt, signal }`: the tick's planned time (ms 0), also when its timer
+  fires late (for the first pass, the time `start()` ran it), and an `AbortSignal` that `stop()`
+  aborts while the pass runs.
 - `start()` runs a first pass before scheduling. Pass `runOnStart: false` to wait for the first tick.
 - Passes never overlap: a tick while a pass is still running is skipped.
 - A failing pass goes to `hooks.onError` and never rejects. The next tick simply runs again.
@@ -261,6 +262,78 @@ defaults to the process's zone. The process zone does not matter once `timezone`
 - On a fall-back day the repeated hour runs once: `*/15 * * * *` in `Europe/Berlin` runs 02:45 CEST,
   then 03:00 CET, skipping the second 02:xx hour, and `0 2 * * *` runs at the first 02:00.
 - Use `timezone: 'UTC'` for a fixed interval through every DST change.
+
+## Interval components
+
+`defineIntervalComponent` runs a job on a fixed delay in milliseconds: a pass, then `intervalMs`
+from the moment it settled, then the next pass. The handler's result decides what follows:
+
+```typescript
+import { defineIntervalComponent } from 'hubwire';
+
+// nothing: wait intervalMs, then run again
+const purge = defineIntervalComponent({
+    intervalMs: 60_000,
+    handler: () => store.purgeExpired(),
+    hooks: {
+        onError: (error) => logger.warn('purge failed', error),
+    },
+});
+
+// { delayMs }: wait that long once, then intervalMs again
+const poller = defineIntervalComponent({
+    intervalMs: 30_000,
+    handler: async () => {
+        const { retryAfterMs } = await feed.poll();
+
+        return retryAfterMs ? { delayMs: retryAfterMs } : undefined;
+    },
+});
+
+// { done: true }: end the loop until the next start()
+const installer = defineIntervalComponent({
+    intervalMs: 5000,
+    runOnStart: true,
+    handler: async () => ((await packages.installPending()) === 0 ? { done: true } : undefined),
+});
+
+// signal: aborted by stop() while a pass runs
+const indexer = defineIntervalComponent({
+    intervalMs: 10_000,
+    handler: ({ signal }) => index.reconcile({ signal }),
+});
+```
+
+- No pass at `start()` unless `runOnStart: true`; the first one comes after `intervalMs`.
+- Passes never overlap, and a wait starts only when the pass settled: a clock that jumps by many
+  intervals runs one pass, not one per interval.
+- `{ delayMs }` must be a positive finite number; anything else counts as a failed pass.
+  `{ done: true }` wins over `delayMs` and leaves the component as `stop()` would: no timer,
+  `runningSince` unset, and a later `start()` begins a new loop (with `runOnStart` again).
+- A failing pass (a throw, a rejection, an invalid `delayMs`) goes to `hooks.onError`, leaves
+  `lastSuccessAt` as it was, and the loop waits `intervalMs`.
+- `stop()` aborts the signal of the pass in flight and arms nothing after it, whatever the pass
+  returns; it does not wait for the pass, `settled()` does. A pass that throws because of the abort
+  is reported to `hooks.onError` like any other failure.
+- A `start()` during a pass joins it; a `start()` on a running loop does nothing.
+- `intervalMs` must be a positive finite number, else the factory throws. A wait longer than one
+  timer can hold (2^31-1 ms) is armed in steps. There is no `lock` option.
+
+## Clock
+
+Components read the time and arm their timers through an `IClock`:
+
+```typescript
+interface IClock {
+    now(): Date;
+    setTimeout(fn: () => void, ms: number): { clear(): void };
+}
+```
+
+`systemClock` (`new Date()` and the global `setTimeout`, as they are) is the default. Pass `clock`
+to `defineScheduledComponent`, `defineIntervalComponent` or `new Component({ clock })` to drive a
+component from your own clock, e.g. `FakeClock` from `@hubwire/test` in a test. `status()` still
+reports epoch milliseconds, taken from `clock.now()`. The message bus keeps reading `Date.now()`.
 
 ## Message bus
 
@@ -554,6 +627,7 @@ to your logger, metrics or tracing:
 | `RemoteWorker` | `onUnrouted(event)` | A forwarded event was dropped because no `publish` routing is set |
 | `defineScheduledComponent` | `onError(error)` | A pass failed, or the lock's `acquire()` rejected (the tick is skipped) |
 | | `onSkip(scheduledAt)` | Another replica holds this tick's lock, or the tick fired `lockTtlMs` or more late. The pass is skipped |
+| `defineIntervalComponent` | `onError(error)` | A pass threw, rejected or returned an invalid `delayMs`. The loop waits `intervalMs` |
 
 ```typescript
 const messageBus = new MessageBus({
@@ -575,10 +649,14 @@ turn an ack into a retry or reject a `publish()`. Your own extensions can follow
 |---|---|---|
 | `Component` | class | `mount()`, `unmount()`, `handle()`, `initialize()`, `start()`, `stop()`, `status()` |
 | `defineScheduledComponent` | function | A cron job as an `IScheduledComponent` (an `IComponent` with `settled()`) |
+| `defineIntervalComponent` | function | A fixed-delay job as an `IScheduledComponent` |
+| `systemClock` | const | The default `IClock` |
+| `IClock`, `ComponentOptions` | type | The clock contract, and `Component`'s options (`clock`) |
 | `IComponent`, `ComponentStatus`, `ComponentEventMap`, `ComponentMetadata`, `ComponentHandler`, `ComponentHandlerFn`, `ComponentHandlerContext`, `ComponentHandleOptions` | type | The component contract and handler types |
 | `ICallable`, `ForwardedEvent` | type | A component with a `handle()`, and one forwarded event |
-| `IScheduledComponent`, `ScheduledComponentOptions`, `ScheduledComponentRunContext` | type | A scheduled component, its options, and what `run` receives (`scheduledAt`) |
+| `IScheduledComponent`, `ScheduledComponentOptions`, `ScheduledComponentRunContext` | type | A scheduled component, its options, and what `run` receives (`scheduledAt`, `signal`) |
 | `IScheduleLock` | type | Elects one replica per tick: `acquire(key, ttlMs)` |
+| `IntervalComponentOptions`, `IntervalComponentHandlerContext`, `IntervalResult` | type | An interval component's options, what `handler` receives (`signal`), and what it returns |
 | `LocalDispatcher`, `RemoteDispatcher`, `RemoteWorker` | class | See [Dispatchers and workers](#dispatchers-and-workers) |
 | `IDispatcher`, `DispatchResult`, `LocalDispatchResult`, `LocalDispatcherOptions`, `RemoteDispatcherOptions`, `RemoteWorkerOptions` | type | Dispatcher contract, results and options |
 | `MessageBus` | class | Type dispatch over a driver, with hooks |
@@ -589,7 +667,7 @@ turn an ack into a retry or reject a `publish()`. Your own extensions can follow
 | `buildMessage`, `isMessage`, `serializeMessage` | function | Message helpers |
 | `assertMessageRouting` | function | Throws a `TypeError` for a routing no driver accepts (a `work` namespace with `/`); drivers call it in `publish()` / `consume()` |
 | `invokeHook` | function | Calls a hook and ignores a throw or rejection |
-| `MessageBusHooks`, `RemoteWorkerHooks`, `ScheduledComponentHooks` | type | Hook types |
+| `MessageBusHooks`, `RemoteWorkerHooks`, `ScheduledComponentHooks`, `IntervalComponentHooks` | type | Hook types |
 
 ## Notes
 

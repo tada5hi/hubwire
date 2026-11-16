@@ -1,6 +1,7 @@
 import { Cron } from 'croner';
 import { systemClock } from '../clock';
 import { invokeHook } from '../hook';
+import { createPassRunner } from './pass';
 import type { IScheduledComponent, ScheduledComponentOptions } from './types';
 
 // the longest a timer waits before the loop looks at the clock again: keeps a far slot
@@ -67,18 +68,12 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
 
     let timer: { clear(): void } | undefined;
     let scheduled = false;
-    // bumped by every start() and stop(): a start() whose first pass was
-    // overtaken by either must not schedule afterwards
-    let generation = 0;
-    let lastSuccessAt: number | undefined;
-    let runningSince: number | undefined;
-    // the pass in flight: a start() during it (a second start(), or one after a stop())
-    // joins it instead of running a second pass next to it
-    let pass: Promise<void> | undefined;
+    // generations: a start() whose first pass was overtaken by a start() or stop() must not schedule afterwards
+    const runner = createPassRunner<void>(clock, options.hooks);
     // epoch ms of the last tick's slot (or of the moment scheduling began): the next slot lies after it
     let last = 0;
 
-    const run = async (scheduledAt: Date, locked: boolean) => {
+    const run = async (scheduledAt: Date, locked: boolean, signal: AbortSignal) => {
         if (locked && lock) {
             let acquired: boolean;
 
@@ -99,27 +94,11 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             // never released: the key is unique per tick, its TTL ends it
         }
 
-        runningSince = clock.now().getTime();
-
-        try {
-            await options.run({ scheduledAt });
-            lastSuccessAt = clock.now().getTime();
-        } catch (e) {
-            invokeHook(options.hooks, 'onError', e);
-        } finally {
-            runningSince = undefined;
-        }
+        await runner.measure(() => options.run({ scheduledAt, signal }));
     };
 
     // the start pass is not locked: its scheduledAt differs per replica, a lock could not dedupe it
-    const execute = (scheduledAt: Date, locked: boolean) => {
-        // cleared asynchronously: a run() that throws synchronously must not leave a settled pass behind
-        pass ??= run(scheduledAt, locked).finally(() => {
-            pass = undefined;
-        });
-
-        return pass;
-    };
+    const execute = (scheduledAt: Date, locked: boolean) => runner.execute((signal) => run(scheduledAt, locked, signal));
 
     function arm() {
         const from = Math.max(clock.now().getTime(), last);
@@ -173,13 +152,13 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
                 return;
             }
 
-            const current = ++generation;
+            const current = runner.next();
 
             if (options.runOnStart ?? !lock) {
                 await execute(clock.now(), false);
             }
 
-            if (current !== generation) {
+            if (!runner.isCurrent(current)) {
                 return;
             }
 
@@ -188,18 +167,16 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
             arm();
         },
         async stop() {
-            generation++;
+            runner.next();
 
             // does not wait for a pass in flight (a pass may stop its own component), see settled();
-            // nothing is scheduled after it
+            // only aborts its signal; nothing is scheduled after it
             scheduled = false;
             timer?.clear();
             timer = undefined;
+            runner.abort();
         },
-        async settled() {
-            // ponytail: one pass at most; a pass started meanwhile (a start() after stop()) is not awaited
-            await pass;
-        },
-        status: () => ({ lastSuccessAt, runningSince }),
+        settled: () => runner.settled(),
+        status: () => runner.status(),
     };
 }

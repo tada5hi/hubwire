@@ -25,9 +25,9 @@ The per-package `test` scripts pass `--run`, so they never enter watch mode — 
 
 ### Unit Tests
 
-`test/unit/` holds the only test layer, one spec per module — hubwire: `component`, `scheduled`,
+`test/unit/` holds the only test layer, one spec per module — hubwire: `component`, `scheduled`, `interval`,
 `hook`, `message-bus`, `memory-driver`, `local-dispatcher`, `remote-dispatcher`, `remote-worker`;
-@hubwire/amqp: `driver`; @hubwire/test: `memory`, `memory-schedule-lock`. Specs import the package under test from its
+@hubwire/amqp: `driver`; @hubwire/test: `memory`, `memory-schedule-lock`, `fake-clock`. Specs import the package under test from its
 **source** barrel (`'../../src'`), not from `dist/`; other packages (`hubwire`, `@hubwire/test`)
 are imported by name (aliased to source).
 
@@ -54,6 +54,10 @@ are imported by name (aliased to source).
   `America/New_York`), and the spec is also run with `TZ=UTC` (CI's zone) before committing:
   `TZ=UTC npx vitest --config test/vitest.config.ts --run test/unit/scheduled.spec.ts`. Fake timers
   may cross a fall-back hour (the timer loop never reads local time).
+- `interval.spec.ts` and the `clock` cases of `scheduled.spec.ts` drive a `FakeClock` (`clock.advance(ms)`,
+  then `drain()` so the pass a timer started settles). A "no global timer" case fakes only
+  `setTimeout`/`clearTimeout` (`vi.useFakeTimers({ toFake: [...] })`): without fake timers
+  `vi.getTimerCount()` is always 0.
 - `driver.spec.ts` (@hubwire/amqp) runs against `FakeAmqpClient` (no broker) and compares every routing
   shape with `fixtures/hub-wire.ts`, captured from hub's former driver. The only allowed
   difference is the retry counter (body `metadata.attempt` → `x-attempt` header, reported to the
