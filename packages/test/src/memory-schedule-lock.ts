@@ -1,8 +1,11 @@
-import type { IScheduleLock } from 'hubwire';
+import { systemClock } from 'hubwire';
+import type { IClock, IScheduleLock } from 'hubwire';
+import type { MemoryScheduleLockOptions } from './types';
+
 
 /**
- * In-process IScheduleLock for tests. Time comes from `Date.now()`, so vitest's fake timers
- * drive expiry: a key acquired at T with `ttlMs` is free at exactly T + ttlMs.
+ * In-process IScheduleLock for tests. Time comes from the `clock` option (default systemClock,
+ * so vitest's fake timers drive expiry; a FakeClock drives it when given): a key acquired at T with `ttlMs` is free at exactly T + ttlMs.
  * `acquired` records every acquire that won, in order; `acquireError` makes acquire() reject
  * (and record nothing).
  */
@@ -14,13 +17,19 @@ export class MemoryScheduleLock implements IScheduleLock {
     // key → epoch ms it expires at
     protected expiries = new Map<string, number>();
 
+    protected clock: IClock;
+
+    constructor(options: MemoryScheduleLockOptions = {}) {
+        this.clock = options.clock ?? systemClock;
+    }
+
     async acquire(key: string, ttlMs: number): Promise<boolean> {
         if (this.acquireError !== undefined) {
             throw this.acquireError;
         }
 
         // check and write without an await in between: two callers cannot both win
-        const now = Date.now();
+        const now = this.clock.now().getTime();
 
         for (const [held, expiresAt] of this.expiries) {
             if (expiresAt <= now) {

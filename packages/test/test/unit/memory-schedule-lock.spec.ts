@@ -6,7 +6,7 @@ import {
     it,
     vi,
 } from 'vitest';
-import { MemoryScheduleLock } from '../../src';
+import { FakeClock, MemoryScheduleLock } from '../../src';
 
 describe('src/memory-schedule-lock', () => {
     beforeEach(() => {
@@ -55,5 +55,19 @@ describe('src/memory-schedule-lock', () => {
         lock.acquireError = new Error('down');
         await expect(lock.acquire('a', 1)).rejects.toThrow('down');
         expect(lock.acquired).toEqual([]);
+    });
+
+    it('should free a key when the given clock passes its ttl', async () => {
+        const clock = new FakeClock(new Date('2030-01-01T00:00:00.000Z'));
+        const lock = new MemoryScheduleLock({ clock });
+
+        await lock.acquire('a', 1000);
+        // the global clock moving does not matter
+        vi.advanceTimersByTime(5000);
+        await expect(lock.acquire('a', 1000)).resolves.toBe(false);
+        clock.advance(999);
+        await expect(lock.acquire('a', 1000)).resolves.toBe(false);
+        clock.advance(1);
+        await expect(lock.acquire('a', 1000)).resolves.toBe(true);
     });
 });
