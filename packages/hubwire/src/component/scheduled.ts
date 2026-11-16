@@ -165,6 +165,13 @@ export function defineScheduledComponent(options: ScheduledComponentOptions): IS
                 return;
             }
 
+            if (runner.inFlight()) {
+                // passes never overlap: the slot is dropped, not queued, and takes no lock
+                skip(new Date(slot), 'running');
+
+                return;
+            }
+
             void execute(new Date(slot), true);
         }, Math.min(slot - clock.now(), RECHECK_MS));
     }

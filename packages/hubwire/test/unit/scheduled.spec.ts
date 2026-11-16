@@ -1153,6 +1153,134 @@ describe('src/component/scheduled', () => {
         });
     });
 
+    describe('a tick during a pass', () => {
+        const T0 = Date.parse('2030-01-15T10:00:00.500Z');
+
+        const define = (clock: FakeClock, options: { lock?: MemoryScheduleLock, throwingHook?: boolean } = {}) => {
+            const entered: string[] = [];
+            const skipped: string[] = [];
+            let gate = Promise.withResolvers<void>();
+            const hooks = {
+                onSkip: (scheduledAt: Date, context: { reason: string }) => {
+                    skipped.push(`${scheduledAt.toISOString()} ${context.reason}`);
+
+                    if (options.throwingHook) {
+                        throw new Error('hook');
+                    }
+                },
+            };
+            const run = async ({ scheduledAt }: { scheduledAt: Date }) => {
+                entered.push(scheduledAt.toISOString());
+                await gate.promise;
+            };
+            const component = options.lock ?
+                defineScheduledComponent({
+                    name: 'cleanup',
+                    schedule: '* * * * * *',
+                    lock: options.lock,
+                    clock,
+                    hooks,
+                    run,
+                }) :
+                defineScheduledComponent({
+                    schedule: '* * * * * *',
+                    runOnStart: false,
+                    clock,
+                    hooks,
+                    run,
+                });
+
+            return {
+                component,
+                entered,
+                skipped,
+                release: () => {
+                    gate.resolve();
+                    gate = Promise.withResolvers<void>();
+                },
+            };
+        };
+
+        const walk = async (clock: FakeClock, seconds: number) => {
+            for (let i = 0; i < seconds; i++) {
+                clock.advance(1000);
+                await drain();
+            }
+        };
+
+        it('should report each slot that comes due during a pass once as running and start no second pass', async () => {
+            const clock = new FakeClock(T0);
+            const {
+                component,
+                entered,
+                skipped,
+                release,
+            } = define(clock);
+
+            await component.start();
+            await walk(clock, 3); // :01 runs, :02 and :03 come due while it does
+            expect(entered).toEqual(['2030-01-15T10:00:01.000Z']);
+            expect(skipped).toEqual(['2030-01-15T10:00:02.000Z running', '2030-01-15T10:00:03.000Z running']);
+
+            release();
+            await drain();
+            await walk(clock, 1);
+            expect(entered).toEqual(['2030-01-15T10:00:01.000Z', '2030-01-15T10:00:04.000Z']);
+            expect(skipped).toHaveLength(2);
+            release();
+            await component.stop();
+            await component.settled();
+        });
+
+        it('should not acquire the lock for a slot dropped while a pass runs', async () => {
+            const clock = new FakeClock(T0);
+            const lock = new MemoryScheduleLock({ clock });
+            const {
+                component,
+                entered,
+                skipped,
+                release,
+            } = define(clock, { lock });
+
+            await component.start();
+            await walk(clock, 2);
+            release();
+            await drain();
+            await walk(clock, 1);
+            release();
+            await component.stop();
+            await component.settled();
+            expect(entered).toEqual(['2030-01-15T10:00:01.000Z', '2030-01-15T10:00:03.000Z']);
+            expect(skipped).toEqual(['2030-01-15T10:00:02.000Z running']);
+            expect(lock.acquired.map(({ key }) => key)).toEqual([
+                'cleanup:2030-01-15T10:00:01.000Z',
+                'cleanup:2030-01-15T10:00:03.000Z',
+            ]);
+        });
+
+        it('should start no second pass when onSkip throws', async () => {
+            const clock = new FakeClock(T0);
+            const {
+                component,
+                entered,
+                skipped,
+                release,
+            } = define(clock, { throwingHook: true });
+
+            await component.start();
+            await walk(clock, 2);
+            expect(entered).toEqual(['2030-01-15T10:00:01.000Z']);
+            expect(skipped).toEqual(['2030-01-15T10:00:02.000Z running']);
+            release();
+            await drain();
+            await walk(clock, 1);
+            expect(entered).toEqual(['2030-01-15T10:00:01.000Z', '2030-01-15T10:00:03.000Z']);
+            release();
+            await component.stop();
+            await component.settled();
+        });
+    });
+
     describe('unref', () => {
         it('should unref every timer it arms: slot waits, capped re-waits and the next slot', async () => {
             const clock = new UnrefClock(Date.parse('2030-01-15T10:00:00.000Z'));

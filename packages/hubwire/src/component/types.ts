@@ -116,10 +116,10 @@ export type ScheduledComponentHookContext = {
 };
 
 /**
- * Why a tick did not run: another replica holds its lock (`locked`), or its timer
- * fired lockTtlMs or more late (`late`).
+ * Why a tick did not run: another replica holds its lock (`locked`), its timer
+ * fired lockTtlMs or more late (`late`), or a pass was still running (`running`).
  */
-export type ScheduledComponentSkipReason = 'locked' | 'late';
+export type ScheduledComponentSkipReason = 'locked' | 'late' | 'running';
 
 export type ScheduledComponentSkipContext = ScheduledComponentHookContext & {
     reason: ScheduledComponentSkipReason,

@@ -197,7 +197,9 @@ await cleaner.settled(); // the pass in flight, if any, has finished
   fires late (for the first pass, the time `start()` ran it), and an `AbortSignal` that `stop()`
   aborts while the pass runs.
 - `start()` runs a first pass before scheduling. Pass `runOnStart: false` to wait for the first tick.
-- Passes never overlap: a tick while a pass is still running is skipped.
+- Passes never overlap: a tick that comes due while a pass is still running is dropped (not
+  queued) and reported to `hooks.onSkip` with reason `'running'`, so passes that overrun their
+  schedule show up. A dropped tick takes no lock.
 - A failing pass goes to `hooks.onError(error, { scheduledAt, name })` and never rejects. The next
   tick simply runs again. `status()` tells failing passes apart: `lastErrorAt` and `lastRunAt` move,
   `lastSuccessAt` stays.
@@ -643,7 +645,7 @@ to your logger, metrics or tracing:
 | | `onError(error, message, routing)` | A handler threw. The error is rethrown to the driver afterwards |
 | `RemoteWorker` | `onUnrouted(event)` | A forwarded event was dropped because no `publish` routing is set |
 | `defineScheduledComponent` | `onError(error, { scheduledAt, name })` | A pass failed, or the lock's `acquire()` rejected (the tick is skipped) |
-| | `onSkip(scheduledAt, { scheduledAt, name, reason })` | A tick was skipped: `'locked'` (another replica holds its lock) or `'late'` (it fired `lockTtlMs` or more late) |
+| | `onSkip(scheduledAt, { scheduledAt, name, reason })` | A tick was skipped: `'locked'` (another replica holds its lock), `'late'` (it fired `lockTtlMs` or more late) or `'running'` (a pass was still running) |
 | `defineIntervalComponent` | `onError(error, { name })` | A pass threw, rejected or returned an invalid `delayMs`. The loop waits `intervalMs` |
 
 ```typescript
